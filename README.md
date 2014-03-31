@@ -40,7 +40,7 @@ I. Minimal variant
  4. Invoke `test_conv_cell.m` and/or `test_lyap.m`
 
 II. Maximal variant
- 1. Download the TT-Toolbox from [http://github.com/oseledets/TT-Toolbox] (using either GIT or "Download ZIP").
+ 1. Download the [[TT-Toolbox](http://github.com/oseledets/TT-Toolbox)] (using either GIT or "Download ZIP").
  2. Download this code (using either GIT or "Download ZIP").
  3. Run the MATLAB.
  4. Change to the TT-Toolbox directory, invoke `setup.m` to initialize paths.
