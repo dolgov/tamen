@@ -9,25 +9,25 @@ conservation laws in tensor product formats", [[arXiv:](http://arxiv.org/abs/)].
 
 Contents
 -----
- tamen.m          Algorithm 1 (tAMEn) from the above paper, time-dependent propagator in the TT format.
+ `tamen.m`          Algorithm 1 (tAMEn) from the above paper, time-dependent propagator in the TT format.
 
- amen_solve.m     AMEn for the linear system solution in the TT format. 
+ `amen_solve.m`     AMEn for the linear system solution in the TT format. 
                   See [[arXiv:1304.1222](http://arxiv.org/abs/1304.1222)], [[arXiv:1301.6068](http://arxiv.org/abs/1301.6068)], and also 
                   [[TT-Toolbox/amen_solve2](http://github.com/oseledets/TT-Toolbox/blob/master/solve/amen_solve2.m)]
 
- ttdR.mAn         Introduction to the {d,R} cell array storage of tensor trains and tensor chains.
+ `ttdR.m`           An Introduction to the {d,R} cell array storage of tensor trains and tensor chains.
 
- test_conv.m      Test file for the convection example (small space and time grids), TT-Toolbox interface.
+ `test_conv.m`      Test file for the convection example (small space and time grids), TT-Toolbox interface.
 
- test_conv_cell.m Test file for the convection example, cell array storage for compatibility.
+ `test_conv_cell.m` Test file for the convection example, cell array storage for compatibility.
 
- test_lyap.m      Test file for the Lyapunov equation, a 10000^2 Poisson problem.
+ `test_lyap.m`      Test file for the Lyapunov equation, a 10000^2 Poisson problem.
 
- amenany_sweep.m  Technical routine with a broad range of inputs and outputs. 
+ `amenany_sweep.m`  Technical routine with a broad range of inputs and outputs. 
                   The AMEn iteration is actually performed here.
                   The reason for a separate file is to shorten the interface routines tamen and amen_solve
 
- dat_conv.mat     Precomputed TT data in cell arrays for test_conv_cell.m
+ `dat_conv.mat`     Precomputed TT data in cell arrays for `test_conv_cell.m`
 		
 
 Usage
