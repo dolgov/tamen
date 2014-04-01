@@ -4,7 +4,7 @@ tAMEn
 Time-dependent AMEn algorithm for solution of the ordinary differential equations
 in the tensor train format.
 See the paper "Alternating minimal energy approach to ODEs and 
-conservation laws in tensor product formats", [[arXiv:](http://arxiv.org/abs/)].
+conservation laws in tensor product formats", [[arXiv:1403.8085](http://arxiv.org/abs/1403.8085)].
 
 
 Contents

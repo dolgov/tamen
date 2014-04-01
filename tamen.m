@@ -62,7 +62,7 @@
 %
 % ******************
 % Please see the reference:
-%   S. Dolgov, http://arxiv.org/abs/???
+%   S. Dolgov, http://arxiv.org/abs/1403.8085
 % for more description. 
 % Feedback may be sent to sergey.v.dolgov@gmail.com
 %

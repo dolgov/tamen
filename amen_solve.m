@@ -72,7 +72,7 @@
 % See also
 %   TT-Toolbox: http://github.com/oseledets/TT-Toolbox
 %   tAMEn:
-%       S. Dolgov, http://arxiv.org/abs/???
+%       S. Dolgov, http://arxiv.org/abs/1403.8085
 
 function [x,opts]=amen_solve(A,y,tol,opts,x0,aux)
 
