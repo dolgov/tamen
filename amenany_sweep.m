@@ -2,7 +2,7 @@
 %   function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
 %
 % !!! Note !!!!
-% This is a technical routine, please use amen_solve or tamen unless you
+% This is an inner routine, please use amen_solve or tamen unless you
 % understand precisely what are you doing.
 
 function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
@@ -110,7 +110,7 @@ for i=d:-1:2
             % Orthogonalize and store
             [crz,~]=qr(crz.', 0);
             rz(i) = size(crz,2);
-            z{i} = crz.';
+            z{i} = reshape(crz.', rz(i), n(i), 1, rz(i+1));
         end;
     else
         % No information is given, just orthogonalize the residual blocks
@@ -121,8 +121,8 @@ for i=d:-1:2
         cr2 = cr2*rv.';
         rz(i) = size(crz, 2);
         crz = reshape(crz.', rz(i), n(i), rz(i+1));
-        z{i-1} = reshape(cr2, rz(i-1), n(i-1), rz(i));
-        z{i} = crz;
+        z{i-1} = reshape(cr2, rz(i-1), n(i-1), 1, rz(i));
+        z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
     end;
     
     % Orthogonalization for X
@@ -133,8 +133,8 @@ for i=d:-1:2
     cr2 = cr2*rv.';
     rx(i) = size(crx, 2);
     crx = reshape(crx.', rx(i), n(i), rx(i+1));
-    x{i-1} = reshape(cr2, rx(i-1), n(i-1), rx(i));
-    x{i} = crx;
+    x{i-1} = reshape(cr2, rx(i-1), n(i-1), 1, rx(i));
+    x{i} = reshape(crx, rx(i), n(i), 1, rx(i+1));
     
     % Compute reductions
     % With X
@@ -313,7 +313,7 @@ for i=1:d
         % in the solution enrichment, not the updated value after the QR
         rzold = rz(i+1);
         rz(i+1) = size(crz,2); % Now replace it
-        z{i} = crz;
+        z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
     end;
     
     if (i<d)
@@ -363,8 +363,8 @@ for i=1:d
         cr2 = reshape(cr2, rx(i+1), n(i+1)*rx(i+2));
         cr2 = v*cr2;
         rx(i+1) = r;
-        x{i+1} = cr2; % now it is a good initial guess
-        x{i} = reshape(u, rx(i), n(i), rx(i+1));
+        x{i+1} = reshape(cr2, rx(i+1), n(i+1), 1, rx(i+2)); % now it is a good initial guess
+        x{i} = reshape(u, rx(i), n(i), 1, rx(i+1));
         
         % Update reductions
         % For X
@@ -374,7 +374,7 @@ for i=1:d
         ZAX(:,i+1) = leftreduce_matrix(ZAX(:,i), z{i}, Ai, u, rz(i),n(i),rz(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
         ZY(:,i+1) = leftreduce_vector(ZY(:,i), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
     else
-        x{i} = reshape(sol, rx(i), n(i), rx(i+1));
+        x{i} = reshape(sol, rx(i), n(i), 1, rx(i+1));
     end;
 end;
 

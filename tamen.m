@@ -4,37 +4,68 @@
 % Tries to solve the linear ODE dx/dt=Ax in the Tensor Train format using 
 % the AMEn iteration for the Chebyshev discretization of the time derivative.
 % The time interval is [0,1], please rescale A if necessary.
+% Nevertheless, the inner splitting and discretization of this interval is
+% performed adaptively. This may result in different forms of output,
+% depending on how many inner splittings were necessary, see below.
 %
 % Xs is the spatial part of the solution, which must have the form of the
 % tensor train. Input can be either a tt_tensor class from the TT-Toolbox, 
-% or a cell array of size d x 1, containing TT cores (see help ttdR). 
-% Output will be given in the same form as the input was.
+% or a cell array of size d x 1, containing TT cores (see help ttdR).
+% However, output can be a d x R cell array if the time interval was split
+% into R subintervals during refinement of time discretization. 
+% For convenience of several subsequent invocations, the input can also have a
+% d x R form with R>1, but only the latest column (:,R) will be extracted,
+% since it is the column where the last snapshot from the previous run is
+% located.
+% If Xs was given as tt_tensor and many time intervals were necessary, the
+% output will still be a single tt_tensor, obtained by calling horzcat on
+% tt_tensors from different subintervals. !!NOTE!! This can lead to
+% inefficient storage, since no truncation is applied. Consider using the 
+% {d,R} format instead if you expect your matrix to be stiff.
 % 
 % Xt is the temporal part of the solution, being a r x Nt double matrix,
-% where r is consistent with the last TT rank of Xs, and Nt is the time 
+% where r is the sum of the last TT ranks of Xs(d,:), and Nt is the time 
 % grid size. On input, the initial state of the ODE is extracted as the last
-% snapshot of the given {Xs,Xt} solution, i.e. x0 = Xs*Xt(:,end). 
+% snapshot of the given {Xs,Xt} solution, i.e. x0 = Xs(:,end)*Xt(:,end). 
 % For convenience in the first run, it is possible to pass x0 in Xs, and 
 % in this case Xt must be a 1x1 cell containing the number of Chebyshev 
 % nodes in time, i.e. Xt={Nt}. The output is always a r x Nt matrix, so you
-% may simple re-invoke the method for the next time steps, if you don't
-% want to change Nt. The vector of time points is returned in the output t
+% may simple re-invoke the method for the next time steps.
+% The vector of time points is returned in the output t
 % in the acscending order, such that t(end)==1.
+% If many time subintervals were necessary, t contains correct global time
+% points on (0,1], merged from all intervals. The columns in Xt are
+% consistent with t. However, note that the rows of Xt are only consistent
+% with the TOTAL rank of Xs, not necessarily with the ranks of individual
+% components Xs(:,k).
 %
-% A must be a nonpositive definite matrix in the TT format, either a
+% Alternatively, one can avoid a separate Xt and keep the temporal dimension
+% as the last rank in Xs. In this case, Xt should be empty [] on input, and
+% it is also returned empty on output. The last rank of Xs corresponds to
+% the time dimension on both input and output.
+% If many time subintervals were necessary, Xt is also empty, since each of
+% Xs columns carries its own time points.
+%
+% A must be a square nonpositive definite matrix in the TT format, either a
 % tt_matrix class from the TT-Toolbox, or a cell array of size D x R,
-% containing TT cores (see help ttdR). A can be either stationary, in this
+% containing TT cores (see help ttdR), or a function, constructing A in
+% either of the previous two formats. A can be either stationary, in this
 % case D==d, and A contains the spatial part only, or time-dependent, in
 % this case D==d+1, the first d blocks contain the spatial part, and the
 % last block must be of size r x Nt x Nt, diagonal w.r.t. the Nt x Nt part.
 % The whole matrix is thus diagonal w.r.t. the time, and the diagonal 
 % contains the spatial matrices evaluated at the Chebyshev points, A(t_j)
 %
+% If A is a function, it should take three arguments Xs,Xt,t. The first two
+% represent the solution as described above (might be useful if the problem
+% is nonlinear), and t is the vector of Chebyshev temporal grid points on
+% the current time interval.
+%
 % tol is the relative tensor truncation and stopping threshold for the
 % AMEn method. The error may be measured either in the frobenius norm, or
 % as the residual. See opts.trunc_norm parameter below.
 %
-% opts is a struct containing finer parameters. For the description of
+% opts is a struct containing tuning parameters. For the description of
 % AMEn-only parameters please see help amen_solve. The tAMEn related fields
 % are the following.
 %   nswp (default 20):          maximal number of AMEn sweeps
@@ -45,8 +76,16 @@
 %                               and stopping purposes. Can be either 'fro'
 %                               (Frobenius norm) or 'res' (residual in the
 %                               local system)
+%   ntstep (default 8):         A step for changing the number of time grid
+%                               points (Nt) during adaptation
+%   time_error_low (def. 1e-4): If the time discretization residual drops
+%                               below tol*time_error_low, decrease Nt
+%   max_nt (default 64):        Maximal Nt allowed. If the temporal
+%                               resolution is still insufficient, split the
+%                               time interval and invoke tamen on each
+%                               subinterval recurrently
 %   verb (default 1):           verbosity level: silent (0), sweep info (1)
-%                               or full info for each block (2).
+%                               or full info for each block (2)
 % opts is returned in outputs, and may be reused in the forthcoming calls.
 %
 % obs is an optional parameter containing generating vectors of linear
@@ -58,6 +97,7 @@
 %
 % Also, the last snapshot x=Xs*Xt(:,end) is returned for convenience,
 % especially in the {d,R} format.
+% The last output t is the vector of Chebyshev time points in (0,1].
 %
 %
 % ******************
@@ -80,11 +120,19 @@ if (isa(Xt, 'cell'))
     % Allow users to specify Xt={Nt} in the first run
     nt = Xt{1};
     Xt = [zeros(1,nt-1), 1];
-else
+elseif (isa(Xt, 'double'))
     nt = size(Xt,2);
 end;
 % Spatial part
 [d,n,~,rxs,vectype]=grumble_vector(Xs,'x');
+% Check if Xt is incorporated into xs    
+Xt_in_Xs = false;
+if (isempty(Xt))    
+    Xt_in_Xs = true;
+    nt = rxs(d+1);
+    Xt = eye(nt);
+end;
+% Copy xs to expanded storage
 rxs = [rxs; 1];
 xs = cell(d+1,1);
 xs{d+1} = Xt;
@@ -92,7 +140,7 @@ if (isa(Xs, 'tt_tensor'))
     xs(1:d) = core2cell(Xs);
 else
     % {d,R} format
-    xs(1:d) = Xs;
+    xs(1:d) = Xs(:,end);
 end;
 % The total size of the system
 N = [n; nt]; 
@@ -107,56 +155,28 @@ if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end;
 if (~isfield(opts, 'verb'));           opts.verb=1;               end;
 if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end;
 if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
+if (~isfield(opts, 'time_error_low')); opts.time_error_low=1e-4;  end;
+if (~isfield(opts, 'max_nt'));         opts.max_nt=64;            end;
+if (~isfield(opts, 'ntstep'));         opts.ntstep=8;             end;
+
+% Internal use only -- these two define the time interval in a recurrent
+% call
+if (~isfield(opts, 'min_t'));          opts.min_t=0;              end;
+if (~isfield(opts, 'max_t'));          opts.max_t=1;              end;
+
+% Check if the number of time steps is not too small
+if (nt<opts.ntstep)
+    Xt = [zeros(size(Xt,1), opts.ntstep-nt), Xt];
+    nt = opts.ntstep;
+    N(d+1)=nt;
+    xs{d+1} = Xt;
+end;
 
 % The local_iters parameter affects only the spatial blocks. The temporal
 % system will be solved directly, so just exit after 1 dummy iteration
 % inside the AMEn algorithm
 if (numel(opts.local_iters)==1)
     opts.local_iters = [opts.local_iters*ones(d,1); 1];
-end;
-
-% Parse the matrix. It will be harder than in amen_solve, since we may have
-% either stationary or time-dependent matrix.
-% First, get the dimension
-if (isa(A, 'tt_matrix'))
-    D = A.d;
-else
-    D = size(A,1);
-end;
-% The only allowed dimensions are d and d+1
-switch(D)
-    case d
-        % Matrix is stationary
-        [~,~,Ra,ras]=grumble_matrix(A,'A',d,n);
-        ras = [ras, ones(d+1,1)];
-        ras = [ras; ones(1,Ra+1)];
-    case d+1
-        % Matrix is time-dependent
-        [~,~,Ra,ras]=grumble_matrix(A,'A',d+1,N);
-        ras = [ras, ones(d+2,1)];
-    otherwise
-        error('dim(A) must be either d (stationary matrix) or d+1 (time-dependent)');
-end;
-% Now copy the cores
-As = cell(d+1, Ra+1);
-if (isa(A, 'tt_matrix'))
-    As(1:D,1) = core2cell(A);
-else
-    As(1:D,1:Ra) = A;
-end;
-% Populate the temporal part with identities
-for i=1:d
-    sparseflag = true;
-    for k=1:Ra
-        if (~issparse(As{i,k})); sparseflag=false; break; end;
-    end;
-    if (sparseflag)
-        % The sparse A-block was introduced for something. Such as large n(i). 
-        % Use a sparse identity also.
-        As{i,Ra+1} = speye(n(i));
-    else
-        As{i,Ra+1} = eye(n(i));
-    end;
 end;
 
 % Orthogonalize the spatial part of the solution
@@ -166,30 +186,43 @@ for i=1:d-1
     cr2 = reshape(xs{i+1}, rxs(i+1), n(i+1)*rxs(i+2));
     cr2 = rvs*cr2;
     rxs(i+1) = size(crx, 2);
-    xs{i} = crx;
-    xs{i+1} = reshape(cr2, rxs(i+1), n(i+1), rxs(i+2));
+    xs{i} = reshape(crx, rxs(i), n(i), 1, rxs(i+1));
+    xs{i+1} = reshape(cr2, rxs(i+1), n(i+1), 1, rxs(i+2));
 end;
 % Extract a precursor for x0, and also the spatial RHS
 x0 = xs;
 rx0 = [rxs(1:d); 1; 1];
 x0{d} = reshape(x0{d}, rxs(d)*n(d), rxs(d+1));
-x0{d} = x0{d}*Xt(:,end); % Now x0 is ready, and |x0|=|x0{d}|.
+% Only take the _last_ rxs(d+1) components of Xt, since the latter can come
+% from merging of several time intervals
+if (size(Xt,1)<rxs(d+1))
+    error('Mismatching Xt and Xs. Are you passing Xt={Nt} to the second call?');
+end;
+x0{d} = x0{d}*Xt(end-rxs(d+1)+1:end,end); % Now x0 is ready, and |x0|=|x0{d}|.
+x0{d} = reshape(x0{d}, rxs(d), n(d), 1);
+
+% Check for not too large nt
+if (nt>opts.max_nt)
+    % Drop Xt. It's safe since x0 was extracted already
+    nt = opts.max_nt;
+    N(d+1)=nt;
+    Xt = [zeros(1,nt-1), 1];
+    xs{d} = x0{d};
+    rxs(d+1)=1;
+    xs{d+1} = Xt;
+end;
 
 % Prepare the spectral scheme in time
 % Spectral differentiator
-[St,t]=chebdiff(nt); % The time of this operation is negligible
-st1 = sum(St, 2);
-st1 = reshape(st1, 1, nt);
-% Fill temporal matrix parts with identities if necessary
-for k=1:Ra
-    if (isempty(As{d+1,k}))
-        As{d+1,k} = eye(nt);
-    end;
-    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), nt*nt);
-    As{d+1,k} = -As{d+1,k};
-end;
+[tprev,St]=chebdiff(nt); % The time of this operation is negligible
 % Temporal RHS.
-x0{d+1} = st1;
+rhst = sum(St, 2);
+rhst = reshape(rhst, 1, nt);
+x0{d+1} = rhst;
+
+% Parse the matrix
+[As,Ra,ras]=parse_matrix(A,N,xs,opts.min_t + tprev*(opts.max_t - opts.min_t),vectype);
+
 % Temporal derivative
 As{d+1,Ra+1} = St;
 
@@ -214,6 +247,7 @@ if ((nargin>=6)&&(~isempty(obs)))
                 error('All aux vectors must be either tt_tensors or {d,R}s');
             end;
         end;
+        obs = Aux(1:d,:); % Might need it for recurrent calls
     else
         % Aux contains {d,R}
         [~,~,~,raux]=grumble_vector(obs,'aux',d,n);
@@ -224,6 +258,7 @@ else
     Aux = [];
     raux = [];
     Raux = 0;
+    obs = [];
 end;
 
 % Prepare a random initial guess for z
@@ -249,12 +284,8 @@ for swp=1:opts.nswp
     % Check and report error levels
     max_err = max(errs);
     max_res = max(resids);
-    if (opts.verb>0)
-        fprintf('tamen: nt=%d, swp=%d, err=%3.3e, res=%3.3e, rank=%d\n', nt, swp, max_err, max_res, max(rxs));
-    end;
     
-    % We don't trust the iterative solvers -- the last temporal system must
-    % be solved directly.
+    % The last temporal system must be solved directly.
     u0 = XY{d+1}; % size rxs(d+1) x 1
     % Correct the 2nd norm. It is transparent: we adjust the norm of the
     % projected initial guess, not the final solution. That is, it works
@@ -284,14 +315,124 @@ for swp=1:opts.nswp
         Atk = reshape(Atk, rxs(d+1)*nt, rxs(d+1)*nt);
         At = At+Atk;
     end;
-    At = kron(St, eye(rxs(d+1)))+At;
-    yt = u0*st1;
-    yt = reshape(yt, rxs(d+1)*nt, 1);
-    % Solve the system, obtain the temporal solution
-    xt = At\yt;
-    Xt = reshape(xt, rxs(d+1), nt);
-    xs{d+1} = Xt;
+    % At this point, we want to measure the residual by using a rectangular
+    % Cheb matrix
+    nt2 = nt+opts.ntstep;
+    [t2,St2]=chebdiff(nt2); % The time of this operation is negligible
+    % Construct interpolant from nt to nt2    
+    P = lagrange_interpolant(tprev,t2);
+    Srect = St2*P;
+    % Now the matrix of size 2nt*r x nt*r
+    At = kron(P, eye(rxs(d+1)))*At;
+    At = kron(Srect, eye(rxs(d+1)))+At;
+    % RHS
+    rhst = sum(Srect,2);
+    yt = u0*rhst.';
+    yt = reshape(yt, rxs(d+1)*nt2, 1);
+    % Solve the LEast Squares system, obtain the temporal solution
+    [Q,R]=qr(At,0);
+    xt = Q'*yt;
+    xt = R\xt;
+    time_resid = norm(At*xt-yt)/norm(yt);
     
+    if (opts.verb>0)
+        fprintf('tamen: nt=%d, swp=%d, err=%3.3e, res=%3.3e, time_res=%3.3e, rank=%d\n', nt, swp, max_err, max_res, time_resid, max(rxs));
+    end;
+
+    Xt = reshape(xt, rxs(d+1), nt);
+    if (time_resid>tol)
+        % If the discretization is insufficient, keep the new grid
+        nt = nt2;
+        Xt = Xt*P.';        
+        if (nt2>opts.max_nt)
+            % Split integration to steps
+            fprintf('Having more than %d Cheb polynomials is not recommended.\nHalving the time step...\n', opts.max_nt);
+            % Assemble x0
+            Xs = x0(1:d);
+            if (strcmp(vectype, 'tt_tensor'))
+                for i=1:d
+                    r1 = size(Xs{i},1);
+                    r2 = size(Xs{i},4);
+                    Xs{i} = reshape(Xs{i}, r1, n(i), r2);
+                end;
+                Xs = cell2core(tt_tensor,Xs);
+            end;
+            % Check if Xt is carried in Xs
+            if (Xt_in_Xs)
+                Xt = [zeros(1,opts.max_nt-1), 1];
+                if (strcmp(vectype, 'tt_tensor'))
+                    Xs = Xs*Xt;
+                else
+                    Xs{d} = reshape(Xs{d}, [], 1);
+                    Xs{d} = Xs{d}*Xt;
+                    Xs{d} = reshape(Xs{d}, [], n(d), 1, opts.max_nt);
+                end;
+                Xt = [];
+            else
+                Xt = {opts.max_nt};
+            end;
+            % Prepare A*0.5 in any of possible forms
+            Ahalf = A;
+            if (isa(A,'tt_matrix'))
+                Ahalf = 0.5*Ahalf;
+            elseif (isa(A,'cell'))
+                for k=1:Ra
+                    Ahalf{1,k}=Ahalf{1,k}*0.5;
+                end;
+            else
+                Ahalf = @(xs,xt,t)(A(xs,xt,t)*0.5);
+            end;
+            % Save my time interval for future
+            min_t_my = opts.min_t;
+            max_t_my = opts.max_t;
+            % Call ourselves recurrently on the first half-interval
+            opts.max_t = min_t_my+(max_t_my-min_t_my)*0.5;
+            fprintf('Solving on (%g, %g]\n', opts.min_t, opts.max_t);
+            [Xs1,Xt1,opts,~,t1] = tamen(Xs,Xt,Ahalf,tol,opts,obs);
+            % Call ourselves recurrently on the second half-interval
+            opts.min_t = min_t_my+(max_t_my-min_t_my)*0.5;
+            opts.max_t = max_t_my;
+            fprintf('Solving on (%g, %g]\n', opts.min_t, opts.max_t);
+            [Xs2,Xt2,opts,x,t2] = tamen(Xs1,Xt1,Ahalf,tol,opts,obs);
+            % Restore the values in opts
+            opts.min_t = min_t_my;
+            opts.max_t = max_t_my;
+            % Merge the solutions
+            Xs = [Xs1,Xs2];
+            if (~isempty(Xt))
+                Xt = [Xt1, zeros(size(Xt1,1), numel(t2));
+                    zeros(size(Xt2,1), numel(t1)), Xt2];
+            end;
+            t = [t1;t2];
+            return;
+        end;
+    end;
+    if (time_resid<tol*opts.time_error_low)&&(nt>opts.ntstep)
+        % We can decrease nt
+        nt = nt-opts.ntstep;
+        [t2,St2]=chebdiff(nt); % The time of this operation is negligible
+        P = lagrange_interpolant(tprev,t2);
+        Xt = Xt*P.';
+    end;
+    % Store the solution
+    xs{d+1} = Xt;
+    if (numel(tprev)~=nt)
+        % And regenerate other items if the time grid changed
+        N(d+1) = nt;
+        % We also need to regenerate other A blocks. NOT interpolate!
+        [As,Ra,ras]=parse_matrix(A,N,xs,opts.min_t + t2*(opts.max_t - opts.min_t),vectype); 
+        % Temporal RHS.
+        x0{d+1} = sum(St2,2);
+        % Temporal derivative
+        As{d+1,Ra+1} = St2; % note: this matrix should be square!
+        % Residual
+        zs{d+1} = reshape(zs{d+1}, rzs(d+1), numel(tprev));
+        zs{d+1} = zs{d+1}*P.';
+        ZAXs=[]; ZYs=[];
+        % Time nodes
+        tprev = t2;
+    end;
+        
     if (strcmp(opts.trunc_norm, 'fro'))
         if (max_err<tol); break; end;
     else
@@ -301,13 +442,17 @@ end;
 
 % Cast spatial solution to the desired form
 if (strcmp(vectype, 'tt_tensor'))
+    for i=1:d
+        xs{i} = reshape(xs{i}, rxs(i), n(i), rxs(i+1));
+    end;
     Xs = cell2core(tt_tensor, xs(1:d));
 else
     Xs = xs(1:d);
-    for i=1:d
-        Xs{i} = reshape(Xs{i}, rxs(i), n(i), 1, rxs(i+1)); % store the sizes in
-    end;
+%     for i=1:d
+%         Xs{i} = reshape(Xs{i}, rxs(i), n(i), 1, rxs(i+1)); % store the sizes in
+%     end;
 end;
+
 
 % Return the last snapshot
 if (nargout>3)
@@ -318,29 +463,127 @@ if (nargout>3)
     % Cast the solution to the desired form
     if (strcmp(vectype, 'tt_tensor'))
         x = cell2core(tt_tensor, x);
-    else
-        rxs(d+1) = 1;
-        for i=1:d
-            x{i} = reshape(x{i}, rxs(i), n(i), 1, rxs(i+1)); % store the sizes in
-        end;
+%     else
+%         rxsd = rxs(d+1);
+%         rxs(d+1) = 1;
+%         for i=1:d
+%             x{i} = reshape(x{i}, rxs(i), n(i), 1, rxs(i+1)); % store the sizes in
+%         end;
+%         rxs(d+1) = rxsd;
     end;
 end;
+
+% Do we want to have Xt separately?
+if (Xt_in_Xs)
+    if (strcmp(vectype, 'tt_tensor'))
+        Xs = Xs*Xt;
+    else
+        Xs{d} = reshape(Xs{d}, rxs(d)*n(d), rxs(d+1));
+        Xs{d} = Xs{d}*Xt;
+        Xs{d} = reshape(Xs{d}, rxs(d), n(d), 1, nt); % store the sizes in
+    end;
+    Xt = [];
+end;
+
 
 % local_iters is normally a scalar, return it
 opts.local_iters = opts.local_iters(1);
 
+t = opts.min_t + tprev*(opts.max_t - opts.min_t); % time nodes
 end
 
 %Computes the Spectral Chebyshev differentiation matrix and nodes
 %on the interval [0,1]. Used Dirichlet BC at 0, and, t is sorted acsending
-function [S,t]=chebdiff(N)
+function [t,S]=chebdiff(N)
+% Generate nodes
 x = ((N-1):-1:0)';
 t = 0.5*(cos(pi*x/N)+1);
-c = [ones(N-1,1); 2].*(-1).^x;
-T = repmat(t,1,N);
-T = T-T';
-S = (c*(1./c)')./(T+eye(N));
-S = S-diag(sum(S, 2)+0.5*(-1)^N*(c./t));
+if (nargout>1)
+    % Generate the matrix
+    c = [ones(N-1,1); 2].*(-1).^x;
+    T = repmat(t,1,N);
+    T = T-T';
+    S = (c*(1./c)')./(T+eye(N));
+    S = S-diag(sum(S, 2)+0.5*(-1)^N*(c./t));
+end;
+end
+
+
+function [As,Ra,ras]=parse_matrix(A,N,xs,t,vectype)
+% Parse the matrix. It will be harder than in amen_solve, since we may have
+% either stationary or time-dependent matrix, or a function generating
+% either of those
+
+% Extract the sizes
+d = numel(N)-1;
+n = N(1:d);
+nt = N(d+1);
+
+if ((~isa(A, 'cell'))&&(~isa(A, 'tt_matrix')))
+    % This is a function and takes (Xs,Xt,t)
+    % Cast spatial solution to the desired form    
+    Xs = xs(1:d);
+    if (strcmp(vectype, 'tt_tensor'))
+        for i=1:d
+            r1 = size(Xs{i},1);
+            r2 = size(Xs{i},4);
+            Xs{i} = reshape(Xs{i}, r1, n(i), r2);
+        end;        
+        Xs = cell2core(tt_tensor, Xs);
+    end;
+    A = A(Xs,xs{d+1},t);
+end;
+
+% Then, get the dimension of the matrix
+if (isa(A, 'tt_matrix'))
+    D = A.d;
+else
+    D = size(A,1);
+end;
+% The only allowed dimensions are d and d+1, where d is the dimension of
+% the vector
+switch(D)
+    case d
+        % Matrix is stationary
+        [~,~,Ra,ras]=grumble_matrix(A,'A',d,n);
+        ras = [ras, ones(d+1,1)];
+        ras = [ras; ones(1,Ra+1)];
+    case d+1
+        % Matrix is time-dependent
+        [~,~,Ra,ras]=grumble_matrix(A,'A',d+1,N);
+        ras = [ras, ones(d+2,1)];
+    otherwise
+        error('dim(A) must be either d (stationary matrix) or d+1 (time-dependent)');
+end;
+% Now copy the cores
+As = cell(d+1, Ra+1);
+if (isa(A, 'tt_matrix'))
+    As(1:D,1) = core2cell(A);
+else
+    As(1:D,1:Ra) = A;
+end;
+% Populate the temporal (:,R+1) parts with identities
+for i=1:d
+    sparseflag = true;
+    for k=1:Ra
+        if (~issparse(As{i,k})); sparseflag=false; break; end;
+    end;
+    if (sparseflag)
+        % The sparse A-block was introduced for something. Such as large n(i). 
+        % Use a sparse identity also.
+        As{i,Ra+1} = speye(n(i));
+    else
+        As{i,Ra+1} = eye(n(i));
+    end;
+end;
+% Fill temporal (d+1,:) matrix parts with identities if necessary
+for k=1:Ra
+    if (isempty(As{d+1,k}))
+        As{d+1,k} = eye(nt);
+    end;
+    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), nt*nt);
+    As{d+1,k} = -As{d+1,k};
+end;
 end
 
 
@@ -381,7 +624,9 @@ else
         Rx = size(x,2);
     end;
     if (strcmp(xname, 'x')||strcmp(xname, 'z'))&&(Rx>1)
-        error('Tensor Chain format (R>1) is not allowed for input %s', xname);
+        fprintf('Tensor Chain format (R>1) is not allowed for input %s,\nbut it can be due to multiple time intervals.\nExtracting the last column.\n', xname);
+        x = x(:,end);
+        Rx = 1;
     end;
     if (nargin<=3)||(isempty(n))
         n_in = ones(d,1);
