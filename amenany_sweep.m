@@ -2,13 +2,13 @@
 %   function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
 %
 % !!! Note !!!!
-% This is an inner routine, please use amen_solve or tamen unless you
-% understand precisely what are you doing.
+% This is a technical routine, please use higher-level amen_solve or tamen 
+% unless you understand precisely what are you doing.
 
 function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
 % XAX: cell(Ra, d+1), XY: cell(Ry, d+1), we may pass XAX(:,i), XAX(:,i+1)
 % ZAX: cell(Ra, d+1), ZY: cell(Ry, d+1), analogously.
-% XAUX: cell(Raux, d+1) stores XAUX (yours sincerely, Kaptian Obviousity)
+% XAUX: cell(Raux, d+1) stores the projection of AUX.
 
 % Parse the optional inputs
 if (nargin<11)||(isempty(opts))
@@ -380,6 +380,8 @@ end;
 
 end
 
+
+
 % Accumulates the left reduction W{1:k}'*A{1:k}*X{1:k}
 function [WAX2] = leftreduce_matrix(WAX1, w, A, x, rw1,n,rw2, Ra,ra1,ra2, rx1,m,rx2)
 % Left WAX has the form of the first matrix TT block, i.e. [rw, rx, ra]
@@ -400,6 +402,7 @@ for k=1:Ra
     WAX2{k} = xc.'*WAX2{k}; % size rx2, ra2 rw2
     WAX2{k} = reshape(WAX2{k}, rx2*ra2(k), rw2);
     WAX2{k} = WAX2{k}.';
+    WAX2{k} = reshape(WAX2{k}, rw2, rx2, ra2(k));
 end;
 end
 
@@ -439,6 +442,7 @@ for k=1:Ra
     WAX1{k} = wc*WAX1{k}; % size rw1, rx1 ra1
     WAX1{k} = reshape(WAX1{k}, rw1*rx1, ra1(k));
     WAX1{k} = WAX1{k}.';
+    WAX1{k} = reshape(WAX1{k}, ra1(k), rw1, rx1);
 end;
 end
 
@@ -491,17 +495,22 @@ for k=1:Ra
 end;
 if (sparseflag)
     B = sparse(rw2*rw1*n, rx2*rx1*m); % reverse order !!!
-    % The reverse order is needed since usually the n x m part is large and
-    % sparse, so let it be the senior dimension.
-    % Note that currently only canonical sparse matrices are allowed
     for k=1:Ra
-        tmp = reshape(WAX2{k}, rw2, rx2);
-        tmp = sparse(tmp);
-        Bk = reshape(WAX1{k}, rw1, rx1);
-        Bk = sparse(Bk);
-        Bk = kron(Bk, tmp); % mind endiannes
-        Bk = kron(A{k}, Bk); % mind endiannes
-        B = B+Bk;
+        Bk = sparse(rw1*n, rx1*m*ra2(k));
+        Ak = reshape(A{k}, ra1(k), []);
+        for j=1:ra1(k)            
+            tmp = WAX1{k}(:,:,j);
+            tmp = sparse(tmp);
+            Bk = Bk + kron(reshape(Ak(j,:), n, m*ra2(k)), tmp);
+        end;
+        Bk = reshape(Bk, rw1*n*rx1*m, ra2(k));
+        for j=1:ra2(k)
+            tmp = reshape(WAX2{k}(j,:,:), rw2, rx2);
+            tmp = sparse(tmp);
+            Ak = Bk(:,j);
+            Ak = reshape(Ak, rw1*n, rx1*m);
+            B = B+kron(Ak, tmp);
+        end;
     end;
 else
     % There are dense blocks, everything is dense, and in the natural index
@@ -603,6 +612,13 @@ else
     end;
     if ((size(x,1)~=d)||(size(rx,1)~=(d+1)))
         error('Inconsistent dimensions of the input %s', objtype);
+    end;
+    if all(~cellfun(@issparse,x))
+        ind = cellfun(@(x)size(x,4), x)~=rx(2:d+1,:);
+        ind = ind(:);
+        if (any(ind))
+            error('Inconsistent ranks (starting from %d) of the input %s', find(ind,1), objtype);
+        end;
     end;
 end;
 end
