@@ -33,18 +33,17 @@ err = zeros(N,1); % For second norm
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-us = u0; % Spatial part==u0
-ut = {64}; % Just the number of Chebyshev points in the first run
+U = {u0; ones(1,64)}; % u0 x ones(number of Chebyshev points in the first run)
 % Go on...
 for i=1:N
     tic; 
-    [us,ut,opts]=tamen(us,ut,B,tol,opts,obs);
+    [U,opts,~,u]=tamen(U,B,tol,opts,obs);
     ttimes(i)=toc;
-    err(i) = norm(ut(:,end))/norm_u0-1;
+    err(i) = norm(u{size(u0,1)}, 'fro')/norm_u0-1;
     % Measure the maximal rank
     for k=1:size(u0,1)
-        if (size(us{k},4)>rnk(i))
-            rnk(i) = size(us{k},4);
+        if (size(U{k},4)>rnk(i))
+            rnk(i) = size(U{k},4);
         end;
     end;
     fprintf('====== i=%d, CPU time=%g, d|u|=%3.3e\n%s\n\n', i, ttimes(i), err(i), datestr(clock));

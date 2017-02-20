@@ -55,17 +55,16 @@ err = zeros(N,3); % d<o|u>, d|u|, |u-u0|
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-us = u0; % Spatial part==u0
-ut = {64}; % Just the number of Chebyshev points in the first run
+U = tkron(u0,tt_ones(64)); % u0 x ones(number of Chebyshev points in the first run)
 % Go on...
 for i=1:N
     tic; 
-    [us,ut,opts]=tamen(us,ut,B,tol,opts,obs);
+    [U,opts,~,u]=tamen(U,B,tol,opts,obs);
     ttimes(i)=toc;
     rnk(i) = max(us.r);
-    err(i,1) = dot(obs{1}, us*ut(:,end))/dot(obs{1},u0)-1; % Error in the 1st norm
-    err(i,2) = norm(ut(:,end))/norm(u0)-1; % Error in the 2nd norm
-    err(i,3) = norm(us*ut(:,end)-u0)/norm(u0); % Discrepancy with u0. Must be small in the final step
+    err(i,1) = dot(obs{1}, u)/dot(obs{1},u0)-1; % Error in the 1st norm
+    err(i,2) = norm(u)/norm(u0)-1; % Error in the 2nd norm
+    err(i,3) = norm(u-u0)/norm(u0); % Discrepancy with u0. Must be small in the final step
     fprintf('====== i=%d, CPU time=%g, d<o|u>=%3.3e, d|u|=%3.3e, |u-u0|=%3.3e\n%s\n\n', i, ttimes(i), err(i,1), err(i,2), err(i,3), datestr(clock));
 end;
 

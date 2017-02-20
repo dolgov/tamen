@@ -9,11 +9,16 @@ conservation laws in tensor product formats", [[arXiv:1403.8085](http://arxiv.or
 
 Contents
 -----
+
+- Main high-end routines
+
  `tamen.m`          Algorithm 1 (tAMEn) from the above paper, time-dependent propagator in the TT format.
 
  `amen_solve.m`     AMEn for the linear system solution in the TT format. 
-                  See [[arXiv:1304.1222](http://arxiv.org/abs/1304.1222)], [[arXiv:1301.6068](http://arxiv.org/abs/1301.6068)], and also 
+                  See [[SIAM J. Sci. Comput., 36(5), A2248](http://epubs.siam.org/doi/10.1137/140953289)], and also 
                   [[TT-Toolbox/amen_solve2](http://github.com/oseledets/TT-Toolbox/blob/master/solve/amen_solve2.m)]
+
+- Help and example files
 
  `ttdR.m`           An Introduction to the {d,R} cell array storage of tensor trains and tensor chains.
 
@@ -23,9 +28,26 @@ Contents
 
  `test_lyap.m`      Test file for the Lyapunov equation, a 10000^2 Poisson problem.
 
+
+- Auxiliary routines (can be also useful besides this project)
+
+ `chebdiff.m`       Creates Chebyshev differentiation matrix for tamen.
+
+ `cheb2_interpolant.m`       Interpolates between two Chebyshev grids.
+
+ `extract_snapshot.m`      Interpolates the global space-time TT solution from tamen into one time point.
+
+- Technical routines (internal/expert use only)
+
  `amenany_sweep.m`  Technical routine with a broad range of inputs and outputs. 
                   The AMEn iteration is actually performed here.
-                  The reason for a separate file is to shorten the interface routines tamen and amen_solve
+                  The reason for a separate file is to shorten the interface routines tamen and amen_solve.
+
+ `grumble_vector.m` Checks a TT vector for consistency. *Technical routine*
+
+ `grumble_matrix.m` Checks a TT matrix for consistency. *Technical routine*
+
+- Data
 
  `dat_conv.mat`     Precomputed TT data in cell arrays for `test_conv_cell.m`
 		
