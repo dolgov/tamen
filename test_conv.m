@@ -61,7 +61,7 @@ for i=1:N
     tic; 
     [U,opts,~,u]=tamen(U,B,tol,opts,obs);
     ttimes(i)=toc;
-    rnk(i) = max(us.r);
+    rnk(i) = max(U.r);
     err(i,1) = dot(obs{1}, u)/dot(obs{1},u0)-1; % Error in the 1st norm
     err(i,2) = norm(u)/norm(u0)-1; % Error in the 2nd norm
     err(i,3) = norm(u-u0)/norm(u0); % Discrepancy with u0. Must be small in the final step

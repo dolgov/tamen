@@ -33,7 +33,7 @@ err = zeros(N,1); % For second norm
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-U = {u0; ones(1,64)}; % u0 x ones(number of Chebyshev points in the first run)
+U = [u0; {ones(1,64)}]; % u0 x ones(number of Chebyshev points in the first run)
 % Go on...
 for i=1:N
     tic; 
