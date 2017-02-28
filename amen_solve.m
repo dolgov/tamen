@@ -157,7 +157,6 @@ z{1} = randn(1, n(1), 1, rz(2));
 ZAX = [];
 ZY = [];
 
-
 for swp=1:opts.nswp
     % Run the AMEn solver
     [x,rx,z,rz,ZAX,ZY,opts,errs,resids]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux);
@@ -169,10 +168,8 @@ for swp=1:opts.nswp
         fprintf('amen_solve: swp=%d, err=%3.3e, res=%3.3e, rank=%d\n', swp, max_err, max_res, max(rx));
     end;    
     % Check the stopping criteria
-    if (strcmp(opts.trunc_norm, 'fro'))
-        if (max_err<tol); break; end;
-    else
-        if (max_res<tol); break; end;
+    if ((strcmp(opts.trunc_norm, 'fro'))&&(max_err<tol))||((~strcmp(opts.trunc_norm, 'fro'))&&(max_res<tol))
+        break;
     end;
 end;
 

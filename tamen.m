@@ -249,7 +249,7 @@ for swp=1:opts.nswp
     % Check and report error levels
     max_err = max(errs);
     max_res = max(resids);
-    
+
     % The last temporal system must be solved directly.
     u0 = XY{d+1}; % size rxs(d+1) x 1
     % Correct the 2nd norm. It is transparent: we adjust the norm of the
@@ -280,7 +280,7 @@ for swp=1:opts.nswp
         Atk = reshape(Atk, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
         At = At+Atk;
     end;
-    % At this point, we want to measure the residual by using a rectangular
+    % At this point, we want to estimate the residual by using a rectangular
     % Cheb matrix
     nt2 = n(d+1)+opts.ntstep;
     [t2,St2]=chebdiff(nt2); % The time of this operation is negligible
@@ -407,11 +407,10 @@ for swp=1:opts.nswp
         % Time nodes
         tprev = t2;
     end;
-        
-    if (strcmp(opts.trunc_norm, 'fro'))
-        if (max_err<tol); break; end;
-    else
-        if (max_res<tol); break; end;
+
+    % Check the convergence
+    if ((strcmp(opts.trunc_norm, 'fro'))&&(max_err<tol))||((~strcmp(opts.trunc_norm, 'fro'))&&(max_res<tol))
+        break;
     end;
 end;
 

@@ -87,10 +87,10 @@ end;
 
 % Right to left iteration: warmup
 for i=d:-1:2
-    if (~isempty(ZAX{1,i}))
-        % ZAX was passed.
-        % We assume that X is left-orthogonal, so we may compute the update for Z
-        if (Rz>0)
+    if (Rz>0)
+        if (~isempty(ZAX{1,i}))
+            % ZAX was passed.
+            % We assume that X is left-orthogonal, so we may compute the update for Z
             % Project the residual to the Z-block:
             %   y
             crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1), Ry,ry(i,:),ry(i+1,:), rz(i),n(i),rz(i+1));
@@ -111,18 +111,18 @@ for i=d:-1:2
             [crz,~]=qr(crz.', 0);
             rz(i) = size(crz,2);
             z{i} = reshape(crz.', rz(i), n(i), 1, rz(i+1));
+        else
+            % No information is given, just orthogonalize the residual blocks
+            crz = reshape(z{i}, rz(i), n(i)*rz(i+1));
+            [crz, rv]=qr(crz.', 0);
+            cr2 = z{i-1};
+            cr2 = reshape(cr2, rz(i-1)*n(i-1), rz(i));
+            cr2 = cr2*rv.';
+            rz(i) = size(crz, 2);
+            crz = reshape(crz.', rz(i), n(i), rz(i+1));
+            z{i-1} = reshape(cr2, rz(i-1), n(i-1), 1, rz(i));
+            z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
         end;
-    else
-        % No information is given, just orthogonalize the residual blocks
-        crz = reshape(z{i}, rz(i), n(i)*rz(i+1));
-        [crz, rv]=qr(crz.', 0);
-        cr2 = z{i-1};
-        cr2 = reshape(cr2, rz(i-1)*n(i-1), rz(i));
-        cr2 = cr2*rv.';
-        rz(i) = size(crz, 2);
-        crz = reshape(crz.', rz(i), n(i), rz(i+1));
-        z{i-1} = reshape(cr2, rz(i-1), n(i-1), 1, rz(i));
-        z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
     end;
     
     % Orthogonalization for X
@@ -141,8 +141,10 @@ for i=d:-1:2
     XAX(:,i) = rightreduce_matrix(XAX(:,i+1), crx, A(i,:), crx, rx(i),n(i),rx(i+1), Ra,ra(i,:),ra(i+1,:), rx(i),n(i),rx(i+1));
     XY(:,i) = rightreduce_vector(XY(:,i+1), crx, y(i,:), rx(i),n(i),rx(i+1), Ry,ry(i,:),ry(i+1,:));
     % With Z
-    ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), crx, rz(i),n(i),rz(i+1), Ra,ra(i,:),ra(i+1,:), rx(i),n(i),rx(i+1));
-    ZY(:,i) = rightreduce_vector(ZY(:,i+1), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+    if (Rz>0)
+        ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), crx, rz(i),n(i),rz(i+1), Ra,ra(i,:),ra(i+1,:), rx(i),n(i),rx(i+1));
+        ZY(:,i) = rightreduce_vector(ZY(:,i+1), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+    end;
 end;
 
 % Initialize the error and residual storages
@@ -227,7 +229,7 @@ for i=1:d
     
     % Truncation
     sol = reshape(sol, rx(i)*n(i), rx(i+1));
-    if (loctol>0)&&(i<d)
+    if (loctol>0)&&(i<d)&&(Rz>0)
         [u,s,v]=svd(sol,'econ');
         s = diag(s);
         if (strcmp(opts.trunc_norm, 'fro'))
@@ -371,8 +373,10 @@ for i=1:d
         XAX(:,i+1) = leftreduce_matrix(XAX(:,i), u, Ai, u, rx(i),n(i),rx(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
         XY(:,i+1) = leftreduce_vector(XY(:,i), u, y(i,:), rx(i),n(i),rx(i+1), Ry,ry(i,:),ry(i+1,:));
         % For Z
-        ZAX(:,i+1) = leftreduce_matrix(ZAX(:,i), z{i}, Ai, u, rz(i),n(i),rz(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
-        ZY(:,i+1) = leftreduce_vector(ZY(:,i), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+        if (Rz>0)
+            ZAX(:,i+1) = leftreduce_matrix(ZAX(:,i), z{i}, Ai, u, rz(i),n(i),rz(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
+            ZY(:,i+1) = leftreduce_vector(ZY(:,i), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+        end;
     else
         x{i} = reshape(sol, rx(i), n(i), 1, rx(i+1));
     end;
