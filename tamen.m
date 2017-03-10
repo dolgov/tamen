@@ -133,6 +133,8 @@ if (~isfield(opts, 'ntstep'));         opts.ntstep=8;             end;
 % call
 if (~isfield(opts, 'min_t'));          opts.min_t=0;              end;
 if (~isfield(opts, 'max_t'));          opts.max_t=1;              end;
+% Another internal -- skip the initial orthogonalization in the inner runs
+if (~isfield(opts, 'reort0'));         opts.reort0=true;          end;
 
 % Check if the number of time steps is not too small, expand the time block
 % if necessary
@@ -149,15 +151,19 @@ if (numel(opts.local_iters)==1)
 end;
 
 % Orthogonalize the spatial part of the solution
-for i=1:d-1
-    crl = reshape(X{i}, rx(i)*n(i), rx(i+1));
-    [crl, rv]=qr(crl, 0);
-    crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
-    crr = rv*crr;
-    rx(i+1) = size(crl, 2);
-    X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
-    X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
+if (opts.reort0)
+    for i=1:d-1
+        crl = reshape(X{i}, rx(i)*n(i), rx(i+1));
+        [crl, rv]=qr(crl, 0);
+        crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
+        crr = rv*crr;
+        rx(i+1) = size(crl, 2);
+        X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
+        X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
+    end;
 end;
+% Save this (original) X for if we need to refine the time step
+X_initial = X;
 % Extract a precursor for x0, and also the spatial RHS
 x0 = X;
 rx0 = [rx(1:d); 1; 1];
@@ -313,8 +319,9 @@ for swp=1:opts.nswp
             % Split integration to steps
             fprintf('Having more than %d Cheb polynomials is not recommended.\nHalving the time step...\n', opts.max_nt);
             % Assemble X from x0
-            X(1:d) = x0(1:d);
-            X{d+1} = ones(1, opts.max_nt);
+            X = X_initial;
+%             X(1:d) = x0(1:d);
+%             X{d+1} = ones(1, opts.max_nt);
             if (strcmp(vectype, 'tt_tensor'))
                 for i=1:d
                     r1 = size(X{i},1);
@@ -337,6 +344,7 @@ for swp=1:opts.nswp
             % Save my time interval for future
             min_t_my = opts.min_t;
             max_t_my = opts.max_t;
+            opts.reort0 = false; % we know it comes out orthogonal
             % Call ourselves recurrently on the first half-interval
             opts.max_t = min_t_my+(max_t_my-min_t_my)*0.5;
             fprintf('Solving on (%g, %g]\n', opts.min_t, opts.max_t);
@@ -349,6 +357,7 @@ for swp=1:opts.nswp
             % Call ourselves recurrently on the second half-interval
             opts.min_t = min_t_my+(max_t_my-min_t_my)*0.5;
             opts.max_t = max_t_my;
+            opts.reort0 = false; % we know it comes out orthogonal            
             % Only the last time interval is needed to continue
             if (isa(X1, 'cell'))
                 X2 = X1(:,end);
@@ -363,9 +372,12 @@ for swp=1:opts.nswp
             if (~isa(t2, 'cell'))
                 t2 = {t2};
             end;
-            % Restore the values in opts
+            % Restore the original values in opts
             opts.min_t = min_t_my;
             opts.max_t = max_t_my;
+            if (isfield(opts, 'reort0'))
+                opts = rmfield(opts, 'reort0');
+            end;
             % Merge the solutions
             if (isa(X1, 'cell'))&&(isa(X2, 'cell'))
                 X = [X1,X2];
