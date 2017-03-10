@@ -108,6 +108,9 @@ d = d-1; % the last block corresponds to time, distinguish it from "space"
 % by treating the tensor as d+1-dimensional.
 if (isa(X, 'tt_tensor'))
     X = core2cell(X);
+    for i=1:d
+        X{i} = reshape(X{i}, rx(i), n(i), 1, rx(i+1));
+    end;
 else
     % {d,R} format
     X = X(:,end);
@@ -158,8 +161,8 @@ if (opts.reort0)
         crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
         crr = rv*crr;
         rx(i+1) = size(crl, 2);
-        X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
         X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
+        X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
     end;
 end;
 % Save this (original) X for if we need to refine the time step
@@ -311,10 +314,10 @@ for swp=1:opts.nswp
     end;
 
     X{d+1} = reshape(xt, rx(d+1), n(d+1));
-    if (time_resid>tol*opts.time_error_high)
+    if (time_resid>tol*opts.time_error_high)&&(swp>1)
         % If the discretization is insufficient, keep the new grid
         n(d+1) = nt2;
-        X{d+1} = X{d+1}*P.';        
+        X{d+1} = X{d+1}*P.';
         if (nt2>opts.max_nt)
             % Split integration to steps
             fprintf('Having more than %d Cheb polynomials is not recommended.\nHalving the time step...\n', opts.max_nt);
@@ -397,7 +400,7 @@ for swp=1:opts.nswp
             return;
         end;
     end;
-    if (time_resid<tol*opts.time_error_low)&&(n(d+1)>opts.ntstep)
+    if (time_resid<tol*opts.time_error_low)&&(n(d+1)>opts.ntstep)&&(swp>1)
         % We can decrease nt
         n(d+1) = n(d+1)-opts.ntstep;
         [t2,St2]=chebdiff(n(d+1)); % The time of this operation is negligible
