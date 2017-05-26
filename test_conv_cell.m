@@ -11,8 +11,9 @@ catch
 end;
 
 % Load the matrix and initial state in the {d,R} format
-load('dat_conv.mat');
-norm_u0 = 32.084841915276819;
+load('dat_conv.mat'); % read u0, B, obs
+norm_u0 = 64.1696838305535948;
+mass_u0 = 8235.4966458264279936;
 tau = 0.2;
 
 % Tensor approximation threshold
@@ -20,33 +21,38 @@ tol = 1e-4;
 
 % Options for the tamen
 opts = struct;
-opts.save2norm = true;
-opts.max_full_size = 400;
-opts.resid_damp = 1000;
-opts.local_iters = 10000;
-opts.verb=1;
+% we want to solve local systems accurately
+% since the ranks are small, use the direct solver always
+opts.max_full_size = inf;
+opts.verb = 0; % we have our own fprintf
 
 % Number of time steps
 N = 100; % one period
 ttimes = zeros(N,1); % For CPU times
-err = zeros(N,1); % For second norm
+err = zeros(N,2); % For firt and second norms
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-U = [u0; {ones(1,64)}]; % u0 x ones(number of Chebyshev points in the first run)
+U = [u0; {ones(1,16)}]; % u0 x ones(number of Chebyshev points in the first run)
 % Go on...
 for i=1:N
     tic; 
-    [U,opts,~,u]=tamen(U,B,tol,opts,obs);
+    [U,~,opts,u]=tamen(U,B,tol,opts,obs);
     ttimes(i)=toc;
-    err(i) = norm(u{size(u0,1)}, 'fro')/norm_u0-1;
+    % Compute the sum
+    mass_u = 1;
+    for j=1:size(u,1)
+        mass_u = mass_u*reshape(sum(u{j},2), size(mass_u,2), []);
+    end;
+    err(i,1) = mass_u/mass_u0-1;
+    err(i,2) = norm(u{size(u0,1)}, 'fro')/norm_u0-1;
     % Measure the maximal rank
     for k=1:size(u0,1)
-        if (size(U{k},4)>rnk(i))
-            rnk(i) = size(U{k},4);
+        if (size(u{k},4)>rnk(i))
+            rnk(i) = size(u{k},4);
         end;
     end;
-    fprintf('====== i=%d, CPU time=%g, d|u|=%3.3e\n%s\n\n', i, ttimes(i), err(i), datestr(clock));
+    fprintf('====== i=%d, CPU time=%g, rank=%d, d<o|u>=%3.3e, d|u|=%3.3e\n', i, ttimes(i), rnk(i), err(i,1), err(i,2));
 end;
 
 figure(1);
@@ -55,8 +61,8 @@ plot(tau*(1:N), rnk);
 legend('max TT rank');
 xlabel('time');
 subplot(1,2,2);
-plot(tau*(1:N), err);
-legend('error in 2nd norm');
+plot(tau*(1:N), err(:,1), tau*(1:N), err(:,2));
+legend('error in sum', 'error in 2nd norm');
 xlabel('time');
 
 fprintf('Total CPU time: %g\n', sum(ttimes));

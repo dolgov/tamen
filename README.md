@@ -12,7 +12,7 @@ Contents
 
 - Main high-end routines
 
- `tamen.m`          Algorithm 1 (tAMEn) from the above paper, time-dependent propagator in the TT format.
+ `tamen.m`          Algorithm 1 (tAMEn) from the above paper, adaptive time propagator in the TT format.
 
  `amen_solve.m`     AMEn for the linear system solution in the TT format. 
                   See [[SIAM J. Sci. Comput., 36(5), A2248](http://epubs.siam.org/doi/10.1137/140953289)], and also 
@@ -27,6 +27,8 @@ Contents
  `test_conv_cell.m` Test file for the convection example, cell array storage for compatibility.
 
  `test_lyap.m`      Test file for the Lyapunov equation, a 10000^2 Poisson problem.
+
+ `test_heat_adap.m` Test file for the heat equation and time adaptivity.
 
 
 - Auxiliary routines (can be also useful besides this project)
@@ -67,7 +69,7 @@ II. Maximal variant
  3. Run the MATLAB.
  4. Change to the TT-Toolbox directory, invoke `setup.m` to initialize paths.
  5. Change to the tamen directory.
- 6. Invoke `test_conv.m`
+ 6. Invoke `test_conv.m` and `test_heat_adap.m`
 
 III. Grand maximal variant
  1. Go through the steps in II. Maximal variant.

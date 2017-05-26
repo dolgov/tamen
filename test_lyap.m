@@ -20,9 +20,8 @@ A1 = spdiags(ones(n,1)*[-1,2,-1], [-1,0,1], n, n);
 I1 = speye(n);
 
 % 2D Laplace operator (A1 x I1 + I1 x A1) in {d,R}
-A = cell(2,2);
-A{1,1} = A1; A{2,2} = A1;
-A{2,1} = I1; A{1,2} = I1;
+A = {A1, I1;
+     I1, A1};
 
 % Right-hand side of all ones
 b = cell(2,1);
@@ -39,8 +38,11 @@ u = amen_solve(A, b, tol, opts);
 toc;
 
 % u{i} is in the form r1 x n x 1 x r2. Reshape to more convenient
-u{1} = reshape(u{1}, n, size(u{1},4));
-u{2} = reshape(u{2}, size(u{2},1), n);
+u{1} = reshape(u{1}, n, []);
+u{2} = u{2}.';
 
 % Plot the principal components
 plot(u{1});
+title('principal components of the solution');
+legend toggle;
+

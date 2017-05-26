@@ -9,7 +9,7 @@ catch
 end;
 
 % One-dimension spatial grid size
-n = 2*ones(9,1);
+n = 2*ones(10,1);
 h = 20/prod(n);
 
 % Uniform grid points
@@ -35,11 +35,10 @@ u0 = tkron(u0,u0);
 
 % Options for the tamen
 opts = struct;
-opts.save2norm = true;
-opts.max_full_size = 400;
-opts.resid_damp = 1000;
-opts.local_iters = 10000;
-opts.verb=1;
+% we want to solve local systems accurately
+% since the ranks are small, use the direct solver always
+opts.max_full_size = inf;
+opts.verb = 0; % we have our own fprintf
 
 % Linear invariant is the sum of the elements == dot(ones,u)
 obs = {tt_ones([n;n])};
@@ -55,17 +54,17 @@ err = zeros(N,3); % d<o|u>, d|u|, |u-u0|
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-U = tkron(u0,tt_ones(64)); % u0 x ones(number of Chebyshev points in the first run)
+U = tkron(u0,tt_ones(16)); % u0 x ones(number of Chebyshev points in the first run)
 % Go on...
 for i=1:N
     tic; 
-    [U,opts,~,u]=tamen(U,B,tol,opts,obs);
+    [U,~,opts,u]=tamen(U,B,tol,opts,obs);
     ttimes(i)=toc;
-    rnk(i) = max(U.r);
-    err(i,1) = dot(obs{1}, u)/dot(obs{1},u0)-1; % Error in the 1st norm
+    rnk(i) = max(u.r);
+    err(i,1) = dot(obs{1}, u)/dot(obs{1},u0)-1; % Error in the sum
     err(i,2) = norm(u)/norm(u0)-1; % Error in the 2nd norm
     err(i,3) = norm(u-u0)/norm(u0); % Discrepancy with u0. Must be small in the final step
-    fprintf('====== i=%d, CPU time=%g, d<o|u>=%3.3e, d|u|=%3.3e, |u-u0|=%3.3e\n%s\n\n', i, ttimes(i), err(i,1), err(i,2), err(i,3), datestr(clock));
+    fprintf('====== i=%d, CPU time=%g, rank=%d, d<o|u>=%3.3e, d|u|=%3.3e, |u-u0|=%3.3e\n', i, ttimes(i), rnk(i), err(i,1), err(i,2), err(i,3));
 end;
 
 figure(1);
@@ -75,7 +74,7 @@ legend('max TT rank');
 xlabel('time');
 subplot(1,2,2);
 plot(tau*(1:N), err(:,1), tau*(1:N), err(:,2));
-legend('error in 1st norm', 'error in 2nd norm');
+legend('error in sum', 'error in 2nd norm');
 xlabel('time');
 
 fprintf('Total CPU time: %g\n', sum(ttimes));

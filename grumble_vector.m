@@ -6,6 +6,14 @@
 % unless you understand precisely what are you doing.
 
 function [d,n,Rx,rx,vectype]=grumble_vector(x,xname,d,n,Rx,rx)
+if (isempty(x))
+    d = 0;
+    n = 0;
+    Rx = 0;
+    rx = 0;
+    vectype = 0;
+    return;
+end;
 if (isa(x, 'tt_tensor'))
     if (nargin>2)&&(~isempty(d))&&(x.d~=d)
         error('dim of %s is inconsistent',xname);
@@ -29,22 +37,41 @@ if (isa(x, 'tt_tensor'))
     end;
     vectype = 'tt_tensor';
 else
-    % {d,R} format with 4 dimensions
-    if (nargin>2)&&(~isempty(d))&&(size(x,1)~=d)
-        error('dim of %s is inconsistent',xname);
-    else
-        d = size(x,1);
-    end;
+    % {d,R} format with 4 dimensions, or maybe a cell of tt_tensors
     if (nargin>4)&&(~isempty(Rx))&&(Rx~=size(x,2))
         error('canonical rank of %s is inconsistent', xname);
     else
         Rx = size(x,2);
     end;
     if (strcmp(xname, 'x')||strcmp(xname, 'z'))&&(Rx>1)
-        fprintf('Tensor Chain format (R>1) is not allowed for input %s,\nbut it can be due to multiple time intervals.\nExtracting the last column.\n', xname);
+        fprintf('Extracting the last term of input %s...\n', xname);
         x = x(:,end);
-        Rx = 1;
+        if (isa(x{1}, 'tt_tensor'))
+            x = x{1};
+        end;
+        if (nargin<3)
+            d = [];
+        end;
+        if (nargin<4)
+            n = [];
+        end;
+        if (nargin<5)
+            Rx = [];
+        end;
+        if (nargin<6)
+            rx = [];
+        else
+            rx = rx(:,end);
+        end;
+        % Parse the last term
+        [d,n,Rx,rx,vectype]=grumble_vector(x,xname,d,n,Rx,rx);
+        return;
     end;
+    if (nargin>2)&&(~isempty(d))&&(size(x,1)~=d)
+        error('dim of %s is inconsistent',xname);
+    else
+        d = size(x,1);
+    end;    
     if (nargin<=3)||(isempty(n))
         n_in = ones(d,1);
     else

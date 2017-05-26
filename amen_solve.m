@@ -159,7 +159,7 @@ ZY = [];
 
 for swp=1:opts.nswp
     % Run the AMEn solver
-    [x,rx,z,rz,ZAX,ZY,opts,errs,resids]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux);
+    [x,rx,z,ZAX,ZY,opts,errs,resids]=amenany_sweep(x,A,y,z, tol, opts, ZAX, ZY, aux);
     
     % Check and report error levels
     max_err = max(errs);

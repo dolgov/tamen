@@ -1,43 +1,41 @@
 % One AMEn iteration for the linear system solution.
-%   function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
+%   function [x,rx,z,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(x,A,y,z, tol, opts, ZAX, ZY, aux)
 %
 % !!! Note !!!!
 % This is a technical routine, please use higher-level amen_solve or tamen 
 % unless you understand precisely what are you doing.
 
-function [x,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, x,rx,A,ra,y,ry,z,rz, tol, opts, ZAX, ZY, aux,raux)
-% XAX: cell(Ra, d+1), XY: cell(Ry, d+1), we may pass XAX(:,i), XAX(:,i+1)
-% ZAX: cell(Ra, d+1), ZY: cell(Ry, d+1), analogously.
+function [x,rx,z,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(x,A,y,z, tol, opts, ZAX, ZY, aux)
+% XAX: cell(Ra, d+1), XY: cell(Ry, d+1), the projections of A and Y onto X
+% ZAX: cell(Ra, d+1), ZY: cell(Ry, d+1), analogously for the residual
 % XAUX: cell(Raux, d+1) stores the projection of AUX.
 
 % Parse the optional inputs
-if (nargin<11)||(isempty(opts))
+if (nargin<6)||(isempty(opts))    
     opts = struct;
 end;
-if (nargin<15)
+if (nargin<9)    
     aux = [];
-    raux = [];
 end;
-if (nargin<12)
+if (nargin<7)    
     ZAX=[];
 end;
-if (nargin<13)
+if (nargin<8)
     ZY=[];
 end;
 
-% Check the inputs for consistency
-d = numel(n);
-       aas_grumble(x,rx,d,'x');
-Ra =   aas_grumble(A,ra,d,'a');
-Ry =   aas_grumble(y,ry,d,'y');
-Rz =   aas_grumble(z,rz,d,'z');
-Raux = aas_grumble(aux,raux,d,'o');
+% Parse the inputs & check for consistency
+[d,n,~,rx]=grumble_vector(x,'x');
+[~,~,Ra,ra]=grumble_matrix(A,'a',d,n);
+[~,~,Ry]=grumble_vector(y,'y',d,n);
+[~,~,Rz,rz]=grumble_vector(z,'z',d,n);
+[~,~,Raux,raux]=grumble_vector(aux,'o');
 
 % Adjust the tolerance to the sqrt(d) factor of the recurrent TT-SVD
 loctol = tol/sqrt(d);
 
 % Parse opts parameters. We just populate what we do not have by defaults
-if (~isfield(opts, 'resid_damp'));      opts.resid_damp=2;      end;
+if (~isfield(opts, 'resid_damp'));      opts.resid_damp=4;      end;
 if (~isfield(opts, 'rmax'));            opts.rmax=Inf;          end;
 if (~isfield(opts, 'max_full_size'));   opts.max_full_size=50;  end;
 if (~isfield(opts, 'local_iters'));     opts.local_iters=100;   end;
@@ -48,41 +46,25 @@ if (~isfield(opts, 'local_prec'));      opts.local_prec='';     end;
 
 % More parsing: check what inputs we have, and what reductions we need
 if (Ra>0)
-    XAX = cell(Ra,d+1);
-    for k=1:Ra
-        XAX{k,1}=1;
-        XAX{k,d+1}=1;
-    end;
+    XAX = cell(1,d+1);
+    XAX{1} = 1;
+    XAX{d+1} = 1;
+    XAX = repmat(XAX, Ra, 1);
 end;
 if (Ry>0)
-    XY = cell(Ry,d+1);
-    for k=1:Ry
-        XY{k,1}=1;
-        XY{k,d+1}=1;
-    end;
+    XY = repmat(XAX(1,:), Ry, 1);
 end;
+XAUX = [];
 if (Raux>0)
-    XAUX = cell(Raux,d+1);
-    for k=1:Raux
-        XAUX{k,1}=1;
-        XAUX{k,d+1}=1;
-    end;
+    XAUX = repmat(XAX(1,:), Raux, 1);
 end;
 
 % Create ZAX, ZY if they were not passed
 if (isempty(ZAX))
-    ZAX = cell(Ra, d+1);
-    for k=1:Ra
-        ZAX{k,1}=1;
-        ZAX{k,d+1}=1;
-    end;
+    ZAX = repmat(XAX(1,:), Ra, 1);
 end;
 if (isempty(ZY))
-    ZY = cell(Ry+1, d+1);
-    for k=1:Ry+1
-        ZY{k,1}=1;
-        ZY{k,d+1}=1;
-    end;
+    ZY = repmat(XAX(1,:), Ry+1, 1);
 end;
 
 % Right to left iteration: warmup
@@ -93,7 +75,7 @@ for i=d:-1:2
             % We assume that X is left-orthogonal, so we may compute the update for Z
             % Project the residual to the Z-block:
             %   y
-            crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1), Ry,ry(i,:),ry(i+1,:), rz(i),n(i),rz(i+1));
+            crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1));
             %   Ax
             crzAx = local_matvec(x{i}, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), A(i,:), ZAX(:,i+1), Ra,ra(i,:),ra(i+1,:));
             % Residual is here
@@ -132,18 +114,18 @@ for i=d:-1:2
     cr2 = reshape(cr2, rx(i-1)*n(i-1), rx(i));
     cr2 = cr2*rv.';
     rx(i) = size(crx, 2);
-    crx = reshape(crx.', rx(i), n(i), rx(i+1));
+    crx = reshape(crx.', rx(i), n(i), 1, rx(i+1));
     x{i-1} = reshape(cr2, rx(i-1), n(i-1), 1, rx(i));
-    x{i} = reshape(crx, rx(i), n(i), 1, rx(i+1));
+    x{i} = crx;
     
     % Compute reductions
     % With X
-    XAX(:,i) = rightreduce_matrix(XAX(:,i+1), crx, A(i,:), crx, rx(i),n(i),rx(i+1), Ra,ra(i,:),ra(i+1,:), rx(i),n(i),rx(i+1));
-    XY(:,i) = rightreduce_vector(XY(:,i+1), crx, y(i,:), rx(i),n(i),rx(i+1), Ry,ry(i,:),ry(i+1,:));
+    XAX(:,i) = rightreduce_matrix(XAX(:,i+1), crx, A(i,:), crx);
+    XY(:,i) = rightreduce_vector(XY(:,i+1), crx, y(i,:));
     % With Z
     if (Rz>0)
-        ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), crx, rz(i),n(i),rz(i+1), Ra,ra(i,:),ra(i+1,:), rx(i),n(i),rx(i+1));
-        ZY(:,i) = rightreduce_vector(ZY(:,i+1), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+        ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), crx);
+        ZY(:,i) = rightreduce_vector(ZY(:,i+1), z{i}, y(i,:));
     end;
 end;
 
@@ -154,7 +136,8 @@ resids = zeros(d,1);
 % Left to right AMEn iteration: solution
 for i=1:d
     % Prepare the local system
-    rhs = assemble_local_vector(XY(:,i), y(i,:), XY(:,i+1), Ry,ry(i,:),ry(i+1,:), rx(i),n(i),rx(i+1));
+    % Right hand side
+    rhs = assemble_local_vector(XY(:,i), y(i,:), XY(:,i+1));
     sol_prev = reshape(x{i}, rx(i)*n(i)*rx(i+1),1);
     norm_rhs = norm(rhs);
     % Extract the matrix parts, accelerate a plenty of iterations with them
@@ -163,13 +146,16 @@ for i=1:d
     XAX2 = XAX(:,i+1);
     ra1 = ra(i,:);
     ra2 = ra(i+1,:);
+    % Matvec function. We must pass all sizes, since extracting them in
+    % every iteration is too expensive
+    mvfun = @(x)local_matvec(x, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2);
     % Measure the residual
-    resids(i) = norm(rhs-local_matvec(sol_prev, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2))/norm_rhs;
+    resids(i) = norm(rhs-mvfun(sol_prev))/norm_rhs;
     
     if (rx(i)*n(i)*rx(i+1)<opts.max_full_size)
         % If the system size is small, assemble the full system and solve
-        % directly
-        [B,sparseflag] = assemble_local_matrix(XAX1, Ai, XAX2, Ra,ra1,ra2, rx(i),n(i),rx(i+1), rx(i),n(i),rx(i+1));
+        % directly    
+        [B,sparseflag] = assemble_local_matrix(XAX1, Ai, XAX2);
         if (sparseflag)
             % Permute the indices such that the spatial mode is the senior,
             % since usually it is large and sparsified, but the rank modes
@@ -200,8 +186,7 @@ for i=1:d
             lociters = lociters(i);
         end;
         % Run the bicgstab without a preconditioner first
-        [sol,flg,relres,iter] = bicgstab(@(x)local_matvec(x, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2),...
-            rhs, max(loctol/opts.resid_damp,eps*2), lociters, [], [], sol_prev);
+        [sol,flg,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, [], [], sol_prev);
         % Report
         if ((opts.verb>1)&&(flg==0))
             fprintf('\tamen_sweep: i=%d. Bicgstab: %g iters, residual %3.3e. ', i, iter, relres);
@@ -211,12 +196,11 @@ for i=1:d
             precfun = [];
             % ... use the Block Jacobi preconditioner, if required            
             if (strcmp(opts.local_prec, 'r'))
-                P = assemble_local_rjacobi(XAX1, Ai, XAX2, Ra,ra1,ra2, rx(i),n(i),rx(i+1));
+                P = assemble_local_rjacobi(XAX1, Ai, XAX2);
                 precfun = @(x)local_precvec(x, rx(i),n(i),rx(i+1),1, P);
             end;
             % In any case, run the bicg once again
-            [sol,~,relres,iter] = bicgstab(@(x)local_matvec(x, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2),...
-                rhs, max(loctol/opts.resid_damp,eps*2), lociters, precfun, [], sol);
+            [sol,~,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, precfun, [], sol);
             % And report its performance
             if (opts.verb>1)
                 fprintf('\tamen_sweep: i=%d. Bicgstab(prec): %g iters, residual %3.3e. ', i, lociters+iter, relres);
@@ -244,13 +228,13 @@ for i=1:d
         else
             % Residual truncation strategy
             % Compute res_new -- our limit for truncation
-            res_new = norm(rhs-local_matvec(sol, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2))/norm_rhs;
+            res_new = norm(rhs-mvfun(sol))/norm_rhs;
             % Start from the previous rank...
             r = min(rx(i)*n(i),rx(i+1));
             r = max(r-rz(i+1,1), 1);
             cursol = u(:,1:r)*diag(s(1:r))*v(:,1:r)';
             % ... check the corresponding residual
-            res = norm(rhs-local_matvec(cursol, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2))/norm_rhs;
+            res = norm(rhs-mvfun(cursol))/norm_rhs;
             if (res<max(loctol, res_new*opts.resid_damp))
                 drank = -1; % rank is overestimated, decrease it
             else
@@ -259,7 +243,7 @@ for i=1:d
             while (r>0)&&(r<=numel(s))
                 % Pick the ranks in the selected direction one by one
                 cursol = u(:,1:r)*diag(s(1:r))*v(:,1:r)';
-                res = norm(rhs-local_matvec(cursol, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2))/norm_rhs;
+                res = norm(rhs-mvfun(cursol))/norm_rhs;
                 if (drank>0)
                     if (res<max(loctol, res_new*opts.resid_damp))
                         break;
@@ -297,7 +281,7 @@ for i=1:d
     % Update the residual Z
     if (Rz>0)
         % y
-        crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1), Ry,ry(i,:),ry(i+1,:), rz(i),n(i),rz(i+1));
+        crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1));
         % Ax
         crzAx = local_matvec(sol, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), Ai, ZAX(:,i+1), Ra,ra1,ra2);
         % z=y-Ax
@@ -322,7 +306,7 @@ for i=1:d
         % Apply enrichment for the solution
         if (Rz>0)
             % y
-            crzy = assemble_local_vector(XY(:,i), y(i,:), ZY(:,i+1), Ry,ry(i,:),ry(i+1,:), rx(i),n(i),rzold);
+            crzy = assemble_local_vector(XY(:,i), y(i,:), ZY(:,i+1));
             % Ax
             crzAx = local_matvec(sol, rx(i),n(i),rx(i+1),1, rx(i),n(i),rzold, XAX1, Ai, ZAX(:,i+1), Ra,ra1,ra2);
             % z
@@ -352,7 +336,7 @@ for i=1:d
             end;
             % Now rv contains only the aux-parts. Extract 'em
             for k=1:Raux
-                XAUX{k,i+1} = rv(:,1:raux(i+1,k));
+                XAUX{k,i+1} = rv(:,1:raux(i+1,k));                     %#ok
                 rv = rv(:, (raux(i+1,k)+1):size(rv,2));
             end;
             % Restore the solution factor. We love White's prediction
@@ -370,12 +354,12 @@ for i=1:d
         
         % Update reductions
         % For X
-        XAX(:,i+1) = leftreduce_matrix(XAX(:,i), u, Ai, u, rx(i),n(i),rx(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
-        XY(:,i+1) = leftreduce_vector(XY(:,i), u, y(i,:), rx(i),n(i),rx(i+1), Ry,ry(i,:),ry(i+1,:));
+        XAX(:,i+1) = leftreduce_matrix(XAX(:,i), x{i}, Ai, x{i});
+        XY(:,i+1) = leftreduce_vector(XY(:,i), x{i}, y(i,:));
         % For Z
         if (Rz>0)
-            ZAX(:,i+1) = leftreduce_matrix(ZAX(:,i), z{i}, Ai, u, rz(i),n(i),rz(i+1), Ra,ra1,ra2, rx(i),n(i),rx(i+1));
-            ZY(:,i+1) = leftreduce_vector(ZY(:,i), z{i}, y(i,:), rz(i),n(i),rz(i+1), Ry,ry(i,:),ry(i+1,:));
+            ZAX(:,i+1) = leftreduce_matrix(ZAX(:,i), z{i}, Ai, x{i});
+            ZY(:,i+1) = leftreduce_vector(ZY(:,i), z{i}, y(i,:));
         end;
     else
         x{i} = reshape(sol, rx(i), n(i), 1, rx(i+1));
@@ -387,78 +371,92 @@ end
 
 
 % Accumulates the left reduction W{1:k}'*A{1:k}*X{1:k}
-function [WAX2] = leftreduce_matrix(WAX1, w, A, x, rw1,n,rw2, Ra,ra1,ra2, rx1,m,rx2)
+function [WAX2] = leftreduce_matrix(WAX1, w, A, x)
 % Left WAX has the form of the first matrix TT block, i.e. [rw, rx, ra]
 WAX2 = WAX1;
+[rx1,m,~,rx2] = size(x);
+[rw1,n,~,rw2] = size(w);
 wc = reshape(w, rw1, n*rw2);
 xc = reshape(x, rx1*m, rx2);
+Ra = size(A,2);
 for k=1:Ra
-    WAX2{k} = reshape(WAX2{k}, rw1, rx1*ra1(k));
+    ra1 = size(WAX1{k},3);
+    WAX2{k} = reshape(WAX2{k}, rw1, rx1*ra1);
     WAX2{k} = wc'*WAX2{k}; % size n rw2 x rx1 ra1
-    WAX2{k} = reshape(WAX2{k}, n, rw2*rx1*ra1(k));
+    WAX2{k} = reshape(WAX2{k}, n, rw2*rx1*ra1);
     WAX2{k} = WAX2{k}.';
-    WAX2{k} = reshape(WAX2{k}, rw2*rx1, ra1(k)*n);
-    tmp = reshape(A{k}, ra1(k)*n, m*ra2(k));
+    WAX2{k} = reshape(WAX2{k}, rw2*rx1, ra1*n);
+    tmp = reshape(A{k}, ra1*n, []); % m*ra2(k)
     WAX2{k} = WAX2{k}*tmp; % size rw2 rx1 m ra2
-    WAX2{k} = reshape(WAX2{k}, rw2, rx1*m*ra2(k));
+    WAX2{k} = reshape(WAX2{k}, rw2, []); % rx1*m*ra2(k)
     WAX2{k} = WAX2{k}.';
-    WAX2{k} = reshape(WAX2{k}, rx1*m, ra2(k)*rw2);
+    WAX2{k} = reshape(WAX2{k}, rx1*m, []); % ra2(k)*rw2
     WAX2{k} = xc.'*WAX2{k}; % size rx2, ra2 rw2
-    WAX2{k} = reshape(WAX2{k}, rx2*ra2(k), rw2);
+    WAX2{k} = reshape(WAX2{k}, [], rw2); % rx2*ra2(k)
     WAX2{k} = WAX2{k}.';
-    WAX2{k} = reshape(WAX2{k}, rw2, rx2, ra2(k));
+    WAX2{k} = reshape(WAX2{k}, rw2, rx2, []); % ra2(k)
 end;
 end
 
 % Accumulates the left reduction W{1:k}'*X{1:k}
-function [WX2] = leftreduce_vector(WX1, w, x, rw1,n,rw2, Rx,rx1,rx2)
+function [WX2] = leftreduce_vector(WX1, w, x)
 % Left WX has the form of the first vector TT block, i.e. [rw, rx]
 WX2 = WX1;
+[rw1,n,~,rw2] = size(w);
 wc = reshape(w, rw1, n*rw2);
+Rx = size(x,2);
 for k=1:Rx
+    [rx1,n,rx2] = size(x{k});
     WX2{k} = wc'*WX2{k}; % size n rw2 x rx1
-    WX2{k} = reshape(WX2{k}, n, rw2*rx1(k));
+    WX2{k} = reshape(WX2{k}, n, rw2*rx1);
     WX2{k} = WX2{k}.';
-    WX2{k} = reshape(WX2{k}, rw2, rx1(k)*n);
-    tmp = reshape(x{k}, rx1(k)*n, rx2(k));
+    WX2{k} = reshape(WX2{k}, rw2, rx1*n);
+    tmp = reshape(x{k}, rx1*n, rx2);
     WX2{k} = WX2{k}*tmp; % size rw2, rx2
 end;
 end
 
 % Accumulates the right reduction W{k:d}'*A{k:d}*X{k:d}
-function [WAX1] = rightreduce_matrix(WAX2, w, A, x, rw1,n,rw2, Ra,ra1,ra2, rx1,m,rx2)
+function [WAX1] = rightreduce_matrix(WAX2, w, A, x)
 % Right WAX has the form of the last matrix TT block, i.e. [ra, rw, rx]
 WAX1 = WAX2;
-wc = reshape(w, rw1, n*rw2);
-wc = conj(wc);
+[rx1,m,~,rx2] = size(x);
+[rw1,n,~,rw2] = size(w);
+wc = conj(w);
+wc = reshape(wc, rw1, n*rw2);
 xc = reshape(x, rx1*m, rx2);
+Ra = size(A,2);
 for k=1:Ra
-    WAX1{k} = reshape(WAX1{k}, ra2(k)*rw2, rx2);
+    ra2 = size(WAX2{k},1);
+    WAX1{k} = reshape(WAX1{k}, ra2*rw2, rx2);
     WAX1{k} = xc*WAX1{k}.'; % size rx1 m x ra2 rw2
-    WAX1{k} = reshape(WAX1{k}, rx1, m*ra2(k)*rw2);
+    WAX1{k} = reshape(WAX1{k}, [], m*ra2*rw2); % rx1
     WAX1{k} = WAX1{k}.';
-    WAX1{k} = reshape(WAX1{k}, m*ra2(k), rw2*rx1);
-    tmp = reshape(A{k}, ra1(k)*n, m*ra2(k));
+    WAX1{k} = reshape(WAX1{k}, m*ra2, []); % rw2*rx1
+    tmp = reshape(A{k}, [], m*ra2); % ra1(k)*n    
     WAX1{k} = tmp*WAX1{k}; % size ra1(k)*n, rw2*rx1
-    WAX1{k} = reshape(WAX1{k}, ra1(k), n*rw2*rx1);
+    WAX1{k} = reshape(WAX1{k}, [], n*rw2*rx1); % ra1(k)
     WAX1{k} = WAX1{k}.';
-    WAX1{k} = reshape(WAX1{k}, n*rw2, rx1*ra1(k));
+    WAX1{k} = reshape(WAX1{k}, n*rw2, []); % rx1*ra1(k)
     WAX1{k} = wc*WAX1{k}; % size rw1, rx1 ra1
-    WAX1{k} = reshape(WAX1{k}, rw1*rx1, ra1(k));
+    WAX1{k} = reshape(WAX1{k}, rw1*rx1, []); % ra1(k)
     WAX1{k} = WAX1{k}.';
-    WAX1{k} = reshape(WAX1{k}, ra1(k), rw1, rx1);
+    WAX1{k} = reshape(WAX1{k}, [], rw1, rx1); % ra1(k)
 end;
 end
 
 % Accumulates the right reduction W{k:d}'*X{k:d}
-function [WX1] = rightreduce_vector(WX2, w, x, rw1,n,rw2, Rx,rx1,rx2)
+function [WX1] = rightreduce_vector(WX2, w, x)
 % Right WX has the form of the last vector TT block, i.e. [rx, rw]
 WX1 = WX2;
+[rw1,n,~,rw2] = size(w);
 wc = reshape(w, rw1, n*rw2);
+Rx = size(x,2);
 for k=1:Rx
-    tmp = reshape(x{k}, rx1(k)*n, rx2(k));
+    [rx1,n,rx2] = size(x{k});
+    tmp = reshape(x{k}, rx1*n, rx2);
     WX1{k} = tmp*WX1{k}; % size rx1 n x rw2
-    WX1{k} = reshape(WX1{k}, rx1(k), n*rw2);
+    WX1{k} = reshape(WX1{k}, rx1, n*rw2);
     WX1{k} = WX1{k}*wc'; % size rx1, rw1
 end;
 end
@@ -488,8 +486,10 @@ for k=1:Ra
 end;
 end
 
+
 % Builds the full (rw1*n*rw2) x (rx1*m*rx2) matrix from its TT blocks
-function [B,sparseflag]=assemble_local_matrix(WAX1, A, WAX2, Ra,ra1,ra2, rw1,n,rw2, rx1,m,rx2)
+function [B,sparseflag]=assemble_local_matrix(WAX1, A, WAX2)
+Ra = size(A,2);
 % Check the sparsity of the matrix blocks
 sparseflag = true;
 for k=1:Ra
@@ -498,42 +498,73 @@ for k=1:Ra
     end;
 end;
 if (sparseflag)
-    B = sparse(rw2*rw1*n, rx2*rx1*m); % reverse order !!!
+    B = sparse(0); % B will be in reversed order, r2*r1*n
     for k=1:Ra
-        Bk = sparse(rw1*n, rx1*m*ra2(k));
-        Ak = reshape(A{k}, ra1(k), []);
-        for j=1:ra1(k)            
-            tmp = WAX1{k}(:,:,j);
-            tmp = sparse(tmp);
-            Bk = Bk + kron(reshape(Ak(j,:), n, m*ra2(k)), tmp);
+        [rw1,rx1,ra1] = size(WAX1{k});
+        [ra2,rw2,rx2] = size(WAX2{k});
+        Bk = sparse(0);
+        if (issparse(A{k}))
+            [n,m] = size(A{k});
+            n = n/ra1;
+            m = m/ra2;            
+        else
+            [~,n,m,~] = size(A{k});
         end;
-        Bk = reshape(Bk, rw1*n*rx1*m, ra2(k));
-        for j=1:ra2(k)
-            tmp = reshape(WAX2{k}(j,:,:), rw2, rx2);
+        if (ra1>1)
+            Ak = reshape(A{k}, ra1, []); % n*m*ra2
+            for j=1:ra1
+                tmp = WAX1{k}(:,:,j);
+                tmp = sparse(tmp);
+                Akj = Ak(j,:);
+                Akj = sparse(Akj);
+                Akj = reshape(Akj, n, m*ra2);
+                Bk = Bk + kron(Akj, tmp);
+            end;
+        else
+            tmp = sparse(WAX1{k});
+            Ak = sparse(A{k});
+            Bk = Bk + kron(Ak, tmp);
+        end;
+        if (ra2>1)
+            Bk = reshape(Bk, rw1*n*rx1*m, ra2);
+            for j=1:ra2
+                tmp = reshape(WAX2{k}(j,:,:), rw2, rx2);
+                tmp = sparse(tmp);
+                Ak = Bk(:,j);
+                Ak = reshape(Ak, rw1*n, rx1*m);
+                B = B + kron(Ak, tmp);
+            end;
+        else
+            tmp = reshape(WAX2{k}, rw2, rx2);
             tmp = sparse(tmp);
-            Ak = Bk(:,j);
-            Ak = reshape(Ak, rw1*n, rx1*m);
-            B = B+kron(Ak, tmp);
+            B = B + kron(Bk, tmp);
         end;
     end;
 else
     % There are dense blocks, everything is dense, and in the natural index
     % order
-    B = zeros(rw1*n*rw2, rx1*m*rx2);
+    B = 0;
     for k=1:Ra
-        Bk = reshape(WAX1{k}, rw1*rx1, ra1(k));
-        tmp = reshape(A{k}, ra1(k), n*m*ra2(k));
+        [rw1,rx1,ra1] = size(WAX1{k});
+        [ra2,rw2,rx2] = size(WAX2{k});
+        Bk = reshape(WAX1{k}, rw1*rx1, ra1);
+        tmp = reshape(A{k}, ra1, []); % n*m*ra2
         if (issparse(tmp))
             % Don't mix sparse if we are already full
             tmp = full(tmp);
+            [n,m] = size(A{k});
+            n = n/ra1;
+            m = m/ra2;
+        else
+            [~,n,m,~] = size(A{k});
         end;
         Bk = Bk*tmp;
-        Bk = reshape(Bk, rw1, rx1, n, m*ra2(k));
+        Bk = reshape(Bk, rw1, rx1, n, m*ra2);
         Bk = permute(Bk, [1,3,2,4]);
-        Bk = reshape(Bk, rw1*n*rx1*m, ra2(k));
-        tmp = reshape(WAX2{k}, ra2(k), rw2*rx2);
+        Bk = reshape(Bk, rw1*n*rx1*m, ra2);
+        tmp = reshape(WAX2{k}, ra2, rw2*rx2);
         Bk = Bk*tmp;
-        Bk = reshape(Bk, rw1*n, rx1*m, rw2, rx2);
+        Bk = reshape(Bk, rw1*n, rx1*m, rw2, rx2);        
         Bk = permute(Bk, [1,3,2,4]);
         Bk = reshape(Bk, rw1*n*rw2, rx1*m*rx2);
         B = B+Bk;
@@ -542,38 +573,52 @@ end;
 end
 
 % Builds the full (rw1*n*rw2) x 1 vector from its TT blocks
-function [w]=assemble_local_vector(WX1, x, WX2, Rx,rx1,rx2, rw1,n,rw2)
-w = zeros(rw1*n*rw2, 1);
+function [w]=assemble_local_vector(WX1, x, WX2)
+w = 0;
+Rx = size(x,2);
+rw1 = size(WX1{1}, 1);
+rw2 = size(WX2{1}, 2);
 for k=1:Rx
-    wk = reshape(x{k}, rx1(k), n*rx2(k));
+    [rx1,n,~,rx2] = size(x{k});
+    wk = reshape(x{k}, rx1, n*rx2);
     wk = WX1{k}*wk;
-    wk = reshape(wk, rw1*n, rx2(k));
+    wk = reshape(wk, rw1*n, rx2);
     wk = wk*WX2{k};
     wk = reshape(wk, rw1*n*rw2, 1);
     w = w+wk;
 end;
 end
 
+
 % Builds the Right Block Jacobi preconditioner: take diag over WAX1
-function [P]=assemble_local_rjacobi(WAX1, A, WAX2, Ra,ra1,ra2, rx1,n,rx2)
+function [P]=assemble_local_rjacobi(WAX1, A, WAX2)
+Ra = size(A,2);
+rx1 = size(WAX1{1}, 2);
+rx2 = size(WAX2{1}, 2);
 P = cell(1, rx1);
 ind1 = (0:rx1-1)*(rx1+1)+1; % cut the diagonal
 for i=1:rx1
-    P{i} = zeros(1, n*rx2*n*rx2);
+    P{i} = 0;
 end;
 for k=1:Ra
-    B1 = reshape(WAX1{k}, rx1*rx1, ra1(k));
+    ra1 = size(WAX1{k},3);
+    ra2 = size(WAX2{k},1);
+    B1 = reshape(WAX1{k}, rx1*rx1, ra1);
     B1 = B1(ind1, :);
     B1 = B1.';
-    tmp = reshape(A{k}, ra1(k)*n*n, ra2(k));
+    tmp = reshape(A{k}, [], ra2); % ra1(k)*n*n
     if (issparse(tmp))
         tmp = full(tmp);
+        n = size(A{k},1);
+        n = n/ra1;
+    else
+        n = size(A{k},2);
     end;
-    Bk = reshape(WAX2{k}, ra2(k), rx2*rx2);
+    Bk = reshape(WAX2{k}, ra2, rx2*rx2);
     Bk = tmp*Bk;
-    Bk = reshape(Bk, ra1(k)*n, n, rx2, rx2);
+    Bk = reshape(Bk, ra1*n, n, rx2, rx2);
     Bk = permute(Bk, [1,3,2,4]);
-    Bk = reshape(Bk, ra1(k), n*rx2*n*rx2);
+    Bk = reshape(Bk, ra1, n*rx2*n*rx2);
     for i=1:rx1
         P{i} = P{i}+B1(:,i).'*Bk;
     end;
@@ -602,27 +647,3 @@ if ((size(P,1)==1)&&(size(P,2)==rx1)) % right prec
 end;
 end
 
-% Checks the inputs for basic consistency
-function [R]=aas_grumble(x,rx,d,objtype)
-if (isempty(x))
-    R = 0; % This shows that this input is absent
-else
-    R = size(x,2);
-    if ((strcmp(objtype, 'x')||strcmp(objtype, 'z'))&&(R>1))
-        error('Tensor Chain format (R>1) is not allowed for the input %s', objtype);
-    end;
-    if (size(rx,2)~=R)
-        error('Inconsistent canonical ranks in the input %s', objtype);
-    end;
-    if ((size(x,1)~=d)||(size(rx,1)~=(d+1)))
-        error('Inconsistent dimensions of the input %s', objtype);
-    end;
-    if all(~cellfun(@issparse,x))
-        ind = cellfun(@(x)size(x,4), x)~=rx(2:d+1,:);
-        ind = ind(:);
-        if (any(ind))
-            error('Inconsistent ranks (starting from %d) of the input %s', find(ind,1), objtype);
-        end;
-    end;
-end;
-end

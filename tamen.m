@@ -1,11 +1,11 @@
 % Time-dependent Alternating Minimal Energy algorithm in the TT format
-%   function [X,opts,t,x] = tamen(X,A,tol,opts,obs)
+%   function [X,t,opts,x] = tamen(X,A,tol,opts,obs)
 %
 % Tries to solve the linear ODE dx/dt=Ax in the Tensor Train format using 
 % the AMEn iteration for the Chebyshev discretization of the time derivative.
 % The time interval is [0,1], please rescale A if necessary.
-% Nevertheless, the inner splitting and discretization of this interval is
-% performed adaptively. This may result in different forms of output,
+% Nevertheless, the interval can be resplit adaptively. 
+% This may result in different forms of output,
 % depending on how many inner splittings were necessary, see below.
 %
 % X is the whole solution, which must have the form of the tensor train,
@@ -19,10 +19,7 @@
 % since it is the column where the last snapshot from the previous run is
 % located.
 % If X was given as tt_tensor and many time intervals were necessary, the
-% output will still be a single tt_tensor, obtained by direct summation of
-% tt_tensors from different subintervals. !!!NOTE!!! This may consume
-% a lot of memory, since no truncation is applied. Consider using the {d,R}
-% format instead if you expect your matrix to be stiff.
+% output will be a 1 x R cell of tt_tensors.
 % 
 % The initial state is extracted as the last snapshot from X. Therefore,
 % in the first time step you can pass in the form X = tkron(x0, tt_ones(nt)) 
@@ -59,16 +56,9 @@
 %                               and stopping purposes. Can be either 'fro'
 %                               (Frobenius norm) or 'res' (residual in the
 %                               local system)
-%   time_error_high (def. 0.1): If the time discretization residual is
-%                               higher than tol*time_error_high, increase Nt
-%   time_error_low (def. 1e-4): If the time discretization residual is
-%                               lower than tol*time_error_low, decrease Nt
-%   max_nt (default 32):        Maximal Nt allowed. If the temporal
-%                               resolution is still insufficient, split the
-%                               time interval and invoke tamen on each
-%                               subinterval recurrently
-%   ntstep (default 8):         Increment (step) for changing Nt (also the
-%                               minimal Nt).
+%   time_error_damp (def. 10):  A time step is rejected if the time
+%                               discretization error is greater than
+%                               tolerance, divided by time_error_damp
 %   verb (default 1):           verbosity level: silent (0), sweep info (1)
 %                               or full info for each block (2)
 % opts is returned in outputs, and may be reused in the forthcoming calls.
@@ -81,9 +71,9 @@
 % size d x M containing TT cores (see help ttdR).
 %
 % 
-% The outputs are X (on the current time interval), opts (with missed
-% fields now populated with their default values), a cell array t of vectors 
-% of Chebyshev time points in (0,1], and the last snapshot x=X(:,...,:,end).
+% The outputs are X (as described above), a cell array t of vectors of 
+% Chebyshev time points in (0,1], opts (with missed fields now populated 
+% with their default values), and the last snapshot x=X(:,...,:,end).
 % Every cell in t corresponds to a particular subinterval of the adaptive
 % scheme. Use cell2mat(t) to obtain the global vector of points.
 %
@@ -101,20 +91,23 @@
 %       http://arxiv.org/abs/1301.6068  and
 %       http://arxiv.org/abs/1304.1222
 
-function [X,opts,t,x] = tamen(X,A,tol,opts,obs)
+function [X_global,t_global,opts,x] = tamen(X,A,tol,opts,obs)
 % Parse the solution
 [d,n,~,rx,vectype]=grumble_vector(X,'x');
 d = d-1; % the last block corresponds to time, distinguish it from "space"
 % by treating the tensor as d+1-dimensional.
+if (isa(X, 'cell'))&&(size(X,2)>1)
+    X = X(:,end);
+end;
+if (isa(X{1}, 'tt_tensor'))
+    X = X{1};
+end;
 if (isa(X, 'tt_tensor'))
+    % Extract tt_tensor content
     X = core2cell(X);
     for i=1:d
         X{i} = reshape(X{i}, rx(i), n(i), 1, rx(i+1));
     end;
-else
-    % {d,R} format
-    X = X(:,end);
-    rx = rx(:,end);
 end;
 
 % Parse the options
@@ -127,24 +120,7 @@ if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end;
 if (~isfield(opts, 'verb'));           opts.verb=1;               end;
 if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end;
 if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
-if (~isfield(opts, 'time_error_low')); opts.time_error_low=1e-4;  end;
-if (~isfield(opts, 'time_error_high'));opts.time_error_high=1e-1; end;
-if (~isfield(opts, 'max_nt'));         opts.max_nt=32;            end;
-if (~isfield(opts, 'ntstep'));         opts.ntstep=8;             end;
-
-% Internal use only -- these two define the time interval in a recurrent
-% call
-if (~isfield(opts, 'min_t'));          opts.min_t=0;              end;
-if (~isfield(opts, 'max_t'));          opts.max_t=1;              end;
-% Another internal -- skip the initial orthogonalization in the inner runs
-if (~isfield(opts, 'reort0'));         opts.reort0=true;          end;
-
-% Check if the number of time steps is not too small, expand the time block
-% if necessary
-if (n(d+1)<opts.ntstep)
-    X{d+1} = [repmat(X{d+1}(:,1), 1, opts.ntstep-n(d+1)), X{d+1}];
-    n(d+1) = opts.ntstep;
-end;
+if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=10;   end;
 
 % The local_iters parameter affects only the spatial blocks. The temporal
 % system will be solved directly, so just exit after 1 dummy iteration
@@ -154,53 +130,15 @@ if (numel(opts.local_iters)==1)
 end;
 
 % Orthogonalize the spatial part of the solution
-if (opts.reort0)
-    for i=1:d-1
-        crl = reshape(X{i}, rx(i)*n(i), rx(i+1));
-        [crl, rv]=qr(crl, 0);
-        crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
-        crr = rv*crr;
-        rx(i+1) = size(crl, 2);
-        X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
-        X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
-    end;
+for i=1:d-1
+    crl = reshape(X{i}, rx(i)*n(i), rx(i+1));
+    [crl, rv]=qr(crl, 0);
+    crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
+    crr = rv*crr;
+    rx(i+1) = size(crl, 2);
+    X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
+    X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
 end;
-% Save this (original) X for if we need to refine the time step
-X_initial = X;
-% Extract a precursor for x0, and also the spatial RHS
-x0 = X;
-rx0 = [rx(1:d); 1; 1];
-x0{d} = reshape(x0{d}, rx(d)*n(d), rx(d+1));
-% Now the last snapshot of the previous call is our x0
-x0{d} = x0{d}*X{d+1}(:,end); % Now x0 is ready, and |x0|=|x0{d}|.
-x0{d} = reshape(x0{d}, rx(d), n(d), 1);
-
-% Check for not too large nt
-if (n(d+1)>opts.max_nt)
-    % Drop Xt. It's safe since x0 was extracted already
-    n(d+1) = opts.max_nt;
-    X{d+1} = ones(1, n(d+1)); % having a uniform Xt might give faster convergence
-    X{d} = x0{d};
-    rx(d+1)=1;
-end;
-
-% Prepare the spectral scheme in time
-% Spectral differentiator
-[tprev,St]=chebdiff(n(d+1)); % The time of this operation is negligible
-% Temporal RHS
-rhst = sum(St, 2);
-rhst = reshape(rhst, 1, n(d+1));
-x0{d+1} = rhst;
-
-% Parse the matrix. We can't overwrite A, since we may call it multiple
-% times below, so store the cell form as As
-[As,Ra,ras]=parse_matrix(A,n,X,opts.min_t + tprev*(opts.max_t - opts.min_t),vectype);
-
-% Temporal derivative
-As{d+1,Ra+1} = St;
-
-% x0's second norm
-x0norm = norm(x0{d}, 'fro');
 
 % Parse auxiliary enrichments
 if ((nargin>=5)&&(~isempty(obs)))
@@ -208,7 +146,7 @@ if ((nargin>=5)&&(~isempty(obs)))
         error('Aux vectors must be given in a cell array');
     end;
     Raux = size(obs,2);
-    Aux = cell(d+1,Raux);
+    Aux = cell(d,Raux);
     if (isa(obs{1}, 'tt_tensor'))
         % Aux contains tt_tensors
         raux = ones(d+1,Raux);
@@ -220,22 +158,18 @@ if ((nargin>=5)&&(~isempty(obs)))
                 error('All aux vectors must be either tt_tensors or {d,R}s');
             end;
         end;
-        obs = Aux(1:d,:); % Might need it for recurrent calls
     else
         % Aux contains {d,R}
         [~,~,~,raux]=grumble_vector(obs,'aux',d,n(1:d));
         Aux(1:d,:) = obs;
     end;
-    raux = [raux; ones(1,Raux)];
 else
     Aux = [];
     raux = [];
     Raux = 0;
-    obs = [];
 end;
 
 % Prepare a random initial guess for z
-ZAX=[]; ZY=[];
 z = cell(d+1,1);
 rz = [1;opts.kickrank*ones(d,1);1];
 for i=d+1:-1:2
@@ -247,220 +181,195 @@ for i=d+1:-1:2
 end;
 z{1} = randn(1, n(1), 1, rz(2));
 
-% Start amen sweeps
-for swp=1:opts.nswp
-    % Run the spatial solver
-    if (Raux>0)
-        [X,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(n, X,rx,As,ras,x0,rx0,z,rz, tol, opts, ZAX, ZY, Aux, raux);
-    else
-        [X,rx,z,rz,ZAX,ZY,opts,errs,resids,XAX,XY]=amenany_sweep(n, X,rx,As,ras,x0,rx0,z,rz, tol, opts, ZAX, ZY, Aux, raux);
-    end;
-    % Check and report error levels
-    max_err = max(errs);
-    max_res = max(resids);
+% Storage for all time steps
+X_global = cell(d+1,10);
+t_global = cell(10,1);
 
-    % The last temporal system must be solved directly.
-    u0 = XY{d+1}; % size rxs(d+1) x 1
-    % Correct the 2nd norm. It is transparent: we adjust the norm of the
-    % projected initial guess, not the final solution. That is, it works
-    % also if the matrix does not conserve the second norm.
-    if (Raux>0)
-        % AUX'*x0 must be conserved, rescale only the orth. complement
-        Caux = zeros(rx(d+1), Raux);
-        for k=1:Raux
-            Caux(:,k) = XAUX{k,d+1}; % each xaux is rxs(d+1) x 1
-        end;
-        [Caux,~]=qr(Caux,0);
-        u0_save = Caux'*u0;
-        u0_change = u0 - Caux*u0_save;
-        u0_change = u0_change*sqrt(abs(x0norm^2 - norm(u0_save)^2))/norm(u0_change);
-        u0 = Caux*u0_save + u0_change;
-    else
-        u0 = u0*(x0norm/norm(u0));
+% Spectral differentiators
+[t_coarse,St]=chebdiff(n(d+1));
+% Temporal RHS
+rhst = sum(St, 2);
+rhst = reshape(rhst, 1, n(d+1));
+iSt = inv(St);
+% Twice as many points for grid refinement
+[t_fine,St2]=chebdiff(n(d+1)*2);
+% Temporal RHS
+% Construct interpolants
+P = cheb2_interpolant(t_coarse, t_fine);
+iSt2 = St2\P;
+
+% Time stepping
+time_step = 1;
+time_global = 0;
+t_cnt = 0;
+while (time_global<1)
+    % Don't advance beyond t=1
+    if (time_global + time_step>1)
+        time_step = 1 - time_global;
     end;
-    % Spatial matrix is reduced to XAX{d+1} [rxs(d+1) x rxs(d+1) x ras(d+1)]
-    At = zeros(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
-    % Assemble the space-time system
+    % Parse the matrix and compute it in all possible ways
+    [As,Ra,ras] = parse_matrix(A,n,X, time_global + t_coarse*time_step, vectype);
     for k=1:Ra
-        Atk = reshape(XAX{k,d+1}, rx(d+1)*rx(d+1), ras(d+1,k));
-        Atk = Atk*As{d+1,k};
-        Atk = reshape(Atk, rx(d+1), rx(d+1), n(d+1), n(d+1));
-        Atk = permute(Atk, [1,3,2,4]);
-        Atk = reshape(Atk, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
-        At = At+Atk;
+        As{1,k}=As{1,k}*time_step;
     end;
-    % At this point, we want to estimate the residual by using a rectangular
-    % Cheb matrix
-    nt2 = n(d+1)+opts.ntstep;
-    [t2,St2]=chebdiff(nt2); % The time of this operation is negligible
-    % Construct interpolant from nt to nt2    
-    P = cheb2_interpolant(tprev, t2);
-    Srect = St2*P;
-    % Now the matrix of size 2nt*r x nt*r
-    At = kron(P, eye(rx(d+1)))*At;
-    At = kron(Srect, eye(rx(d+1)))+At;
-    % RHS
-    rhst = sum(Srect,2);
-    yt = u0*rhst.';
-    yt = reshape(yt, rx(d+1)*nt2, 1);
-    % Solve the LEast Squares system, obtain the temporal solution
-    [Q,R]=qr(At,0);
-    xt = Q'*yt;
-    xt = R\xt;
-    time_resid = norm(At*xt-yt)/norm(yt);
+    % Put the temporal derivative into the storage
+    As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));
     
-    if (opts.verb>0)
-        fprintf('tamen: nt=%d, swp=%d, err=%3.3e, res=%3.3e, time_res=%3.3e, rank=%d\n', n(d+1), swp, max_err, max_res, time_resid, max(rx));
-    end;
-
-    X{d+1} = reshape(xt, rx(d+1), n(d+1));
-    if (time_resid>tol*opts.time_error_high)&&(swp>1)
-        % If the discretization is insufficient, keep the new grid
-        n(d+1) = nt2;
-        X{d+1} = X{d+1}*P.';
-        if (nt2>opts.max_nt)
-            % Split integration to steps
-            fprintf('Having more than %d Cheb polynomials is not recommended.\nHalving the time step...\n', opts.max_nt);
-            % Assemble X from x0
+    % Save the original X for if we need to reject the time step   
+    rx = [cellfun(@(x)size(x,1), X); 1];
+    X_initial = X;
+    % Extract a precursor for x0, and also the spatial RHS
+    x0 = X;
+    x0{d} = reshape(x0{d}, rx(d)*n(d), rx(d+1));
+    % Now the last snapshot of the previous call is our x0
+    x0{d} = x0{d}*X{d+1}(:,end); % Now x0 is ready, and |x0|=|x0{d}|.
+    x0{d} = reshape(x0{d}, rx(d), n(d), 1);
+    % x0's second norm
+    x0norm = norm(x0{d}, 'fro');
+    % Temporal RHS    
+    x0{d+1} = rhst;
+    
+    % Drop residual reductions, since x0 has changed
+    ZAX = []; ZY = [];
+    
+    % Start amen sweeps
+    for swp=1:opts.nswp
+        % Run the spatial solver                                      
+        [X,rx,z,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(X, As, x0, z, tol, opts, ZAX, ZY, Aux);
+        % Check and report error levels
+        max_err = max(errs);
+        max_res = max(resids);
+        
+        % The last temporal system must be solved directly.
+        u0 = XY{d+1}; % size rxs(d+1) x 1
+        % Correct the 2nd norm. It is transparent: we adjust the norm of the
+        % projected initial guess, not the final solution. That is, it works
+        % also if the matrix does not conserve the second norm.
+        if (Raux>0)
+            % AUX'*x0 must be conserved, rescale only the orth. complement
+            Caux = zeros(rx(d+1), sum(raux(d+1,:)));
+            pos = 1;
+            for k=1:Raux
+                Caux(:,pos:pos+raux(d+1,k)-1) = XAUX{k,d+1}; % each xaux is rxs(d+1) x 1
+                pos = pos+raux(d+1,k);
+            end;
+            [Caux,~]=qr(Caux,0);
+            u0_save = Caux'*u0;
+            u0_change = u0 - Caux*u0_save;
+            u0_change = u0_change*sqrt(abs(x0norm^2 - norm(u0_save)^2))/norm(u0_change);
+            u0 = Caux*u0_save + u0_change;
+        else
+            u0 = u0*(x0norm/norm(u0)); % this can perturb the solution if the time discretization is insufficient
+        end;
+        % Spatial matrix is reduced to XAX{d+1} [rxs(d+1) x rxs(d+1) x ras(d+1)]
+        At = zeros(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
+        % Assemble the space-time systems
+        for k=1:Ra
+            Atk = reshape(XAX{k,d+1}, rx(d+1)*rx(d+1), ras(d+1,k));
+            Atk2 = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
+            Atk2 = Atk*Atk2;
+            Atk2 = reshape(Atk2, rx(d+1), rx(d+1), n(d+1), n(d+1));
+            Atk2 = permute(Atk2, [1,3,2,4]);
+            Atk2 = reshape(Atk2, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
+            At = At+Atk2;
+        end;
+        % Solve the system with the square matrix first
+        AT = eye(rx(d+1)*n(d+1)) + kron(iSt, eye(rx(d+1)))*At;
+        yt = repmat(u0, 1, n(d+1));
+        yt = reshape(yt, rx(d+1)*n(d+1), 1);
+        xt = AT\yt;
+        X{d+1} = reshape(xt, rx(d+1), n(d+1));
+        
+        % We want to estimate the residual by using a rectangular Cheb matrix
+        AT2 = kron(P, eye(rx(d+1))) + kron(iSt2,eye(rx(d+1)))*At;
+        yt = repmat(u0, 1, 2*n(d+1));
+        yt = reshape(yt, rx(d+1)*n(d+1)*2, 1);
+        time_resid = norm(AT2*xt - yt, 'fro')/norm(yt, 'fro');
+        
+        if (opts.verb>0)
+            fprintf('tamen: t=%g, swp=%d, err=%3.3e, res=%3.3e, time_res=%3.3e, rank=%d\n', time_global+time_step, swp, max_err, max_res, time_resid, max(rx));
+        end;
+        
+        % A ratio of the time error and the tolerance
+        dtime_step = tol/(opts.time_error_damp*time_resid);
+        reject = false;
+        if (dtime_step<1)&&(swp>1)
+            % If the discretization is severely insufficient, reject this step
             X = X_initial;
-%             X(1:d) = x0(1:d);
-%             X{d+1} = ones(1, opts.max_nt);
-            if (strcmp(vectype, 'tt_tensor'))
-                for i=1:d
-                    r1 = size(X{i},1);
-                    r2 = size(X{i},4);
-                    X{i} = reshape(X{i}, r1, n(i), r2);
-                end;
-                X = cell2core(tt_tensor,X);
-            end;
-            % Prepare A*0.5 in any of possible forms
-            Ahalf = A;
-            if (isa(A,'tt_matrix'))
-                Ahalf = 0.5*Ahalf;
-            elseif (isa(A,'cell'))
-                for k=1:Ra
-                    Ahalf{1,k}=Ahalf{1,k}*0.5;
-                end;
-            else
-                Ahalf = @(x,t)(A(x,t)*0.5);
-            end;
-            % Save my time interval for future
-            min_t_my = opts.min_t;
-            max_t_my = opts.max_t;
-            opts.reort0 = false; % we know it comes out orthogonal
-            % Call ourselves recurrently on the first half-interval
-            opts.max_t = min_t_my+(max_t_my-min_t_my)*0.5;
-            fprintf('Solving on (%g, %g]\n', opts.min_t, opts.max_t);
-            [X1,opts,t1] = tamen(X,Ahalf,tol,opts,obs);
-            % t1 is cell of all prev. time points, but not the first time
-            % we are here
-            if (~isa(t1, 'cell'))
-                t1 = {t1};
-            end;
-            % Call ourselves recurrently on the second half-interval
-            opts.min_t = min_t_my+(max_t_my-min_t_my)*0.5;
-            opts.max_t = max_t_my;
-            opts.reort0 = false; % we know it comes out orthogonal            
-            % Only the last time interval is needed to continue
-            if (isa(X1, 'cell'))
-                X2 = X1(:,end);
-            else
-                % X1 is a tt_tensor
-                X2 = X1; % we don't really know how many components to extract
-                Xt = X1{d+1};
-                X2{d+1} = Xt(:, end-numel(t1{end})+1:end);
-            end;
-            fprintf('Solving on (%g, %g]\n', opts.min_t, opts.max_t);
-            [X2,opts,t2,x] = tamen(X2,Ahalf,tol,opts,obs);
-            if (~isa(t2, 'cell'))
-                t2 = {t2};
-            end;
-            % Restore the original values in opts
-            opts.min_t = min_t_my;
-            opts.max_t = max_t_my;
-            if (isfield(opts, 'reort0'))
-                opts = rmfield(opts, 'reort0');
-            end;
-            % Merge the solutions
-            if (isa(X1, 'cell'))&&(isa(X2, 'cell'))
-                X = [X1,X2];
-            elseif (isa(X1, 'tt_tensor'))&&(isa(X2, 'tt_tensor'))
-                % We need to direct sum the time TT blocks
-                r1 = X1.r(d+1);
-                n1 = X1.n(d+1);
-                r2 = X2.r(d+1);
-                n2 = X2.n(d+1);
-                X1{d+1} = [X1{d+1}, zeros(r1, n2)];
-                X2{d+1} = [zeros(r2, n1), X2{d+1}];
-                X = X1+X2;
-            else
-                error('something''s wrong, can''t merge {d,R} from one interval and tt_tensor from another');
-            end;
-            t = [t1; t2]; % t1 and t2 are cells
-            return;
+            reject = true;
+            break;
+        end;
+        
+        % Check AMEn convergence
+        if (swp>=opts.nswp)||((strcmp(opts.trunc_norm, 'fro'))&&(max_err<tol))||((~strcmp(opts.trunc_norm, 'fro'))&&(max_res<tol))
+            % The current time step converged, include it and advance time
+            break;
         end;
     end;
-    if (time_resid<tol*opts.time_error_low)&&(n(d+1)>opts.ntstep)&&(swp>1)
-        % We can decrease nt
-        n(d+1) = n(d+1)-opts.ntstep;
-        [t2,St2]=chebdiff(n(d+1)); % The time of this operation is negligible
-        P = cheb2_interpolant(tprev,t2);
-        X{d+1} = X{d+1}*P.';
-    end;
-    % And regenerate matrix and residual if the time grid has changed    
-    if (numel(tprev)~=n(d+1))
-        % We really need to regenerate other A blocks. NOT interpolate!
-        [As,Ra,ras]=parse_matrix(A,n,X,opts.min_t + t2*(opts.max_t - opts.min_t),vectype); 
-        % New temporal RHS.
-        x0{d+1} = sum(St2,2);
-        % Temporal derivative
-        As{d+1,Ra+1} = St2; % note: this matrix should be square!
-        % Residual
-        z{d+1} = reshape(z{d+1}, rz(d+1), numel(tprev));
-        z{d+1} = z{d+1}*P.';
-        ZAX=[]; ZY=[];
-        % Time nodes
-        tprev = t2;
-    end;
 
-    % Check the convergence
-    if ((strcmp(opts.trunc_norm, 'fro'))&&(max_err<tol))||((~strcmp(opts.trunc_norm, 'fro'))&&(max_res<tol))
-        break;
+    if (opts.verb>0)
+        fprintf('\t t=%g, time_res=%3.3e, rank=%d, ', time_global+time_step, time_resid, max(rx));
+    end;
+    if (~reject)
+        % this time step was ok, register it
+        t_cnt = t_cnt + 1;
+        if (t_cnt>size(X_global,2))
+            % allocate more cells
+            X_global = [X_global, cell(d+1,10)];                       %#ok
+            t_global = [t_global; cell(10,1)];                         %#ok
+        end;
+        X_global(:,t_cnt) = X;
+        t_global{t_cnt} = time_global + t_coarse*time_step;
+        time_global = time_global + time_step;
+    end;
+    % Amend the time step to the current error
+    time_step = time_step*min(0.5*(dtime_step)^(2/n(d+1)), 2);
+    if (opts.verb>0)
+        fprintf('new time step=%3.3e ', time_step);
+        if (reject)
+            fprintf('\t !REJECT!\n\n');
+        else
+            fprintf('\n\n');
+        end;
     end;
 end;
 
+X_global = X_global(:,1:t_cnt);
+t_global = t_global(1:t_cnt,:);
+
+
 % Cast the whole solution to tt_tensor if we want
 if (strcmp(vectype, 'tt_tensor'))
-    for i=1:d
-        X{i} = reshape(X{i}, rx(i), n(i), rx(i+1));
+    for k=1:t_cnt
+        X_global{1,k} = cell2core(tt_matrix, X_global(:,k));
+        X_global{1,k} = X_global{1,k}.tt;
     end;
-    X = cell2core(tt_tensor, X);
+    X_global = X_global(1,:);
+    if (t_cnt==1)
+        X_global = X_global{1};
+    end;
 end;
 
 % Return the last snapshot
 if (nargout>3)
     Xt = X{d+1};
     Xt = Xt(:,end);
+    x = X(1:d);
+    x{d} = reshape(x{d}, rx(d)*n(d), rx(d+1));
+    x{d} = x{d}*Xt;
+    x{d} = reshape(x{d}, rx(d), n(d));
+    rx(d+1) = 1;
+    for i=1:d
+        x{i} = reshape(x{i}, rx(i), n(i), 1, rx(i+1)); % store the sizes in
+    end;
     if (strcmp(vectype, 'tt_tensor'))
-        x = chunk(X,1,d);
-        x = x*Xt;
-    else
-        x = X(1:d);
-        x{d} = reshape(x{d}, rx(d)*n(d), rx(d+1));
-        x{d} = x{d}*Xt;
-        x{d} = reshape(x{d}, rx(d), n(d));
-        rx(d+1) = 1;
-        for i=1:d
-            x{i} = reshape(x{i}, rx(i), n(i), 1, rx(i+1)); % store the sizes in
-        end;        
+        x = cell2core(tt_matrix,x);
+        x = x.tt;
     end;
 end;
 
-
 % local_iters is normally a scalar, return it
 opts.local_iters = opts.local_iters(1);
-
-t = opts.min_t + tprev*(opts.max_t - opts.min_t); % time nodes
 end
 
 
@@ -526,7 +435,7 @@ for i=1:d
         % Use a sparse identity also.
         As{i,Ra+1} = speye(n(i));
     else
-        As{i,Ra+1} = eye(n(i));
+        As{i,Ra+1} = reshape(eye(n(i)), 1, n(i), n(i));
     end;
 end;
 % Fill temporal (d+1,:) matrix parts with identities if necessary
@@ -534,7 +443,7 @@ for k=1:Ra
     if (isempty(As{d+1,k}))
         As{d+1,k} = eye(n(d+1));
     end;
-    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
+    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1), n(d+1));
     As{d+1,k} = -As{d+1,k};
 end;
 end

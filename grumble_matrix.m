@@ -6,6 +6,13 @@
 % unless you understand precisely what are you doing.
 
 function [d,n,Ra,ra]=grumble_matrix(a,aname,d,n,Ra,ra)
+if (isempty(a))
+    d = 0;
+    n = 0;
+    Ra = 0;
+    ra = 0;
+    return;
+end;
 if (isa(a, 'tt_matrix'))
     if (nargin>2)&&(~isempty(d))&&(a.d~=d)
         error('dim of %s is inconsistent',aname);
@@ -75,7 +82,7 @@ else
                     % assume a rank-1 block
                     n_in(i) = size(a{i,k},1);
                     if (size(a{i,k},2)~=n_in(i)) % Square matrix only for now
-                        error('block (%d,%d) of %s is not square', i, k, aname);
+                        error('block (%d,%d) of %s is not square, or a matrix is of TT rank >1', i, k, aname);
                     end;
                     ra_in(i,k) = 1;
                     ra_in(i+1,k) = 1;
