@@ -77,7 +77,11 @@ for i=d:-1:2
             %   y
             crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1));
             %   Ax
-            crzAx = local_matvec(x{i}, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), A(i,:), ZAX(:,i+1), Ra,ra(i,:),ra(i+1,:));
+            Ai = A(i,:);
+            for k=1:Ra
+                Ai{k} = reshape(Ai{k}, ra(i,k)*n(i), n(i)*ra(i+1,k));
+            end;             
+            crzAx = local_matvec(x{i}, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), Ai, ZAX(:,i+1), Ra,ra(i,:),ra(i+1,:));
             % Residual is here
             crz = crzy-crzAx;
             crz = reshape(crz, rz(i), n(i)*rz(i+1));
@@ -90,41 +94,24 @@ for i=d:-1:2
                 crz = crz2;
             end;
             % Orthogonalize and store
-            [crz,~]=qr(crz.', 0);
-            rz(i) = size(crz,2);
-            z{i} = reshape(crz.', rz(i), n(i), 1, rz(i+1));
+            crz = reshape(crz, rz(i), n(i), 1, rz(i+1));
+            [~,z{i},rz(i)] = orthogonalise_block([],crz,-1);
         else
             % No information is given, just orthogonalize the residual blocks
-            crz = reshape(z{i}, rz(i), n(i)*rz(i+1));
-            [crz, rv]=qr(crz.', 0);
-            cr2 = z{i-1};
-            cr2 = reshape(cr2, rz(i-1)*n(i-1), rz(i));
-            cr2 = cr2*rv.';
-            rz(i) = size(crz, 2);
-            crz = reshape(crz.', rz(i), n(i), rz(i+1));
-            z{i-1} = reshape(cr2, rz(i-1), n(i-1), 1, rz(i));
-            z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
+            [z{i-1},z{i},rz(i)] = orthogonalise_block(z{i-1},z{i},-1);
         end;
     end;
     
     % Orthogonalization for X
-    crx = reshape(x{i}, rx(i), n(i)*rx(i+1));
-    [crx, rv]=qr(crx.', 0);
-    cr2 = x{i-1};
-    cr2 = reshape(cr2, rx(i-1)*n(i-1), rx(i));
-    cr2 = cr2*rv.';
-    rx(i) = size(crx, 2);
-    crx = reshape(crx.', rx(i), n(i), 1, rx(i+1));
-    x{i-1} = reshape(cr2, rx(i-1), n(i-1), 1, rx(i));
-    x{i} = crx;
+    [x{i-1},x{i},rx(i)] = orthogonalise_block(x{i-1},x{i},-1);
     
     % Compute reductions
     % With X
-    XAX(:,i) = rightreduce_matrix(XAX(:,i+1), crx, A(i,:), crx);
-    XY(:,i) = rightreduce_vector(XY(:,i+1), crx, y(i,:));
+    XAX(:,i) = rightreduce_matrix(XAX(:,i+1), x{i}, A(i,:), x{i});
+    XY(:,i) = rightreduce_vector(XY(:,i+1), x{i}, y(i,:));
     % With Z
     if (Rz>0)
-        ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), crx);
+        ZAX(:,i) = rightreduce_matrix(ZAX(:,i+1), z{i}, A(i,:), x{i});
         ZY(:,i) = rightreduce_vector(ZY(:,i+1), z{i}, y(i,:));
     end;
 end;
@@ -146,6 +133,9 @@ for i=1:d
     XAX2 = XAX(:,i+1);
     ra1 = ra(i,:);
     ra2 = ra(i+1,:);
+    for k=1:Ra
+        Ai{k} = reshape(Ai{k}, ra1(k)*n(i), n(i)*ra2(k));
+    end;    
     % Matvec function. We must pass all sizes, since extracting them in
     % every iteration is too expensive
     mvfun = @(x)local_matvec(x, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2);
@@ -155,7 +145,7 @@ for i=1:d
     if (rx(i)*n(i)*rx(i+1)<opts.max_full_size)
         % If the system size is small, assemble the full system and solve
         % directly    
-        [B,sparseflag] = assemble_local_matrix(XAX1, Ai, XAX2);
+        [B,sparseflag] = assemble_local_matrix(XAX1, A(i,:), XAX2);
         if (sparseflag)
             % Permute the indices such that the spatial mode is the senior,
             % since usually it is large and sparsified, but the rank modes
@@ -196,7 +186,7 @@ for i=1:d
             precfun = [];
             % ... use the Block Jacobi preconditioner, if required            
             if (strcmp(opts.local_prec, 'r'))
-                P = assemble_local_rjacobi(XAX1, Ai, XAX2);
+                P = assemble_local_rjacobi(XAX1, A(i,:), XAX2);
                 precfun = @(x)local_precvec(x, rx(i),n(i),rx(i+1),1, P);
             end;
             % In any case, run the bicg once again
@@ -293,13 +283,12 @@ for i=1:d
             crz = crz(:,1:max(rz(i+1,1)-opts.kickrank2, 1));
             crz2 = [crz, randn(rz(i,1)*n(i), opts.kickrank2)];
             crz = crz2;
-        end;
-        [crz,~]=qr(crz, 0);
+        end;       
         % Careful: store the old rank of z, since it is that will be used
         % in the solution enrichment, not the updated value after the QR
         rzold = rz(i+1);
-        rz(i+1) = size(crz,2); % Now replace it
-        z{i} = reshape(crz, rz(i), n(i), 1, rz(i+1));
+        crz = reshape(crz, rz(i), n(i), 1, rz(i+1));
+        [~,z{i},rz(i+1)] = orthogonalise_block([],crz,1);
     end;
     
     if (i<d)
@@ -465,23 +454,22 @@ end
 % full vectors of size (rx1*m*rx2) x b. Returns (rw1*n*rw2) x b
 function [w]=local_matvec(x, rx1,m,rx2,b, rw1,n,rw2, WAX1, A, WAX2, Ra,ra1,ra2)
 w = zeros(rw1*n*rw2, b);
-xc = reshape(x, rx1*m*rx2, b);
+xc = reshape(x, [], b); % rx1*m*rx2
 xc = xc.';
-xc = reshape(xc, b*rx1*m, rx2);
+xc = reshape(xc, [], rx2); % b*rx1*m
 for k=1:Ra
-    tmp = reshape(WAX2{k}, ra2(k)*rw2, rx2);
+    tmp = reshape(WAX2{k}, [], rx2); % ra2(k)*rw2
     wk = xc*tmp.';
-    wk = reshape(wk, b*rx1, m*ra2(k)*rw2);
+    wk = reshape(wk, b*rx1, []); % m*ra2(k)*rw2
     wk = wk.';
-    wk = reshape(wk, m*ra2(k), rw2*b*rx1);
-    tmp = reshape(A{k}, ra1(k)*n, m*ra2(k));
-    wk = tmp*wk;
-    wk = reshape(wk, ra1(k)*n*rw2*b, rx1);
+    wk = reshape(wk, m*ra2(k), []); % rw2*b*rx1
+    wk = A{k}*wk;
+    wk = reshape(wk, [], rx1); % ra1(k)*n*rw2*b
     wk = wk.';
-    wk = reshape(wk, rx1*ra1(k), n*rw2*b);
-    tmp = reshape(WAX1{k}, rw1, rx1*ra1(k));
+    wk = reshape(wk, rx1*ra1(k), []); % n*rw2*b
+    tmp = reshape(WAX1{k}, rw1, []); % rx1*ra1(k)
     wk = tmp*wk;
-    wk = reshape(wk, rw1*n*rw2, b);
+    wk = reshape(wk, [], b); % rw1*n*rw2
     w = w+wk;
 end;
 end

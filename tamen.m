@@ -131,13 +131,7 @@ end;
 
 % Orthogonalize the spatial part of the solution
 for i=1:d-1
-    crl = reshape(X{i}, rx(i)*n(i), rx(i+1));
-    [crl, rv]=qr(crl, 0);
-    crr = reshape(X{i+1}, rx(i+1), n(i+1)*rx(i+2));
-    crr = rv*crr;
-    rx(i+1) = size(crl, 2);
-    X{i+1} = reshape(crr, rx(i+1), n(i+1), 1, rx(i+2));
-    X{i} = reshape(crl, rx(i), n(i), 1, rx(i+1));
+    [X{i+1},X{i},rx(i+1)] = orthogonalise_block(X{i+1},X{i},1);
 end;
 
 % Parse auxiliary enrichments
@@ -173,11 +167,8 @@ end;
 z = cell(d+1,1);
 rz = [1;opts.kickrank*ones(d,1);1];
 for i=d+1:-1:2
-    z{i} = randn(n(i)*rz(i+1), rz(i));
-    [z{i},~]=qr(z{i}, 0);
-    rz(i) = size(z{i},2);
-    z{i} = z{i}.';
-    z{i} = reshape(z{i}, rz(i), n(i), 1, rz(i+1));
+    z{i} = randn(rz(i), n(i), 1, rz(i+1));
+    [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
 end;
 z{1} = randn(1, n(1), 1, rz(2));
 

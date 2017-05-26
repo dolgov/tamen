@@ -92,11 +92,8 @@ if ((nargin<5)||(isempty(x0)))
     x = cell(d,1);
     rx = [1;2*ones(d-1,1);1];
     for i=d:-1:2
-        x{i} = randn(n(i)*rx(i+1), rx(i));
-        [x{i},~]=qr(x{i}, 0);
-        rx(i) = size(x{i},2);
-        x{i} = x{i}.';
-        x{i} = reshape(x{i}, rx(i), n(i), 1, rx(i+1));
+        x{i} = randn(rx(i), n(i), 1, rx(i+1));
+        [~,x{i},rx(i)] = orthogonalise_block([],x{i},-1);
     end;
     x{1} = randn(1, n(1), 1, rx(2));
 else
@@ -147,11 +144,8 @@ if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
 z = cell(d,1);
 rz = [1;opts.kickrank*ones(d-1,1);1];
 for i=d:-1:2
-    z{i} = randn(n(i)*rz(i+1), rz(i));
-    [z{i},~]=qr(z{i}, 0);
-    rz(i) = size(z{i},2);
-    z{i} = z{i}.';
-    z{i} = reshape(z{i}, rz(i), n(i), 1, rz(i+1));
+    z{i} = randn(rz(i), n(i), 1, rz(i+1));
+    [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
 end;
 z{1} = randn(1, n(1), 1, rz(2));
 ZAX = [];
@@ -177,10 +171,6 @@ end;
 if (strcmp(vectype, 'tt_tensor'))
     x = cell2core(tt_matrix, x);
     x = x.tt;
-else
-    for i=1:d
-        x{i} = reshape(x{i}, rx(i), n(i), 1, rx(i+1)); % store the sizes in
-    end;
 end;
 end
 

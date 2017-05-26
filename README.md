@@ -49,6 +49,8 @@ Contents
 
  `grumble_matrix.m` Checks a TT matrix for consistency. *Technical routine*
 
+ `orthogonalise_block.m` Perform orthogonalisation in a pair of TT blocks. *Technical routine*
+
 - Data
 
  `dat_conv.mat`     Precomputed TT data in cell arrays for `test_conv_cell.m`
