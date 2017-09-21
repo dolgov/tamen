@@ -9,14 +9,14 @@ catch
 end;
 
 % One-dimension spatial grid size
-n = 2*ones(10,1);
+n = 2*ones(12,1);
 h = 20/prod(n);
 
 % Uniform grid points
 x = tt_x(n)*h-10;
 
 % Tensor approximation threshold
-tol = 1e-4;
+tol = 1e-5;
 
 % Construct the central difference matrix in 1D
 A = tt_shift(n,numel(n),-1)-tt_shift(n,numel(n),1);
@@ -38,7 +38,8 @@ opts = struct;
 % we want to solve local systems accurately
 % since the ranks are small, use the direct solver always
 opts.max_full_size = inf;
-opts.verb = 0; % we have our own fprintf
+opts.time_scheme = 'cheb';
+opts.verb = 1; % we have our own fprintf
 
 % Linear invariant is the sum of the elements == dot(ones,u)
 obs = {tt_ones([n;n])};
@@ -48,13 +49,13 @@ tau = 0.2;
 B = B*tau;
 
 % Number of time steps
-N = 100; % one period
+N = 500; % one period is 100(*0.2)
 ttimes = zeros(N,1); % For CPU times
 err = zeros(N,3); % d<o|u>, d|u|, |u-u0|
 rnk = zeros(N,1); % For tensor ranks
 
 % Initialize tamen:
-U = tkron(u0,tt_ones(16)); % u0 x ones(number of Chebyshev points in the first run)
+U = tkron(u0,tt_ones(8)); % u0 x ones(number of time points)
 % Go on...
 for i=1:N
     tic; 

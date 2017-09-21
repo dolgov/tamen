@@ -46,9 +46,8 @@ else
     else
         Ra = size(a,2);
     end;
-    if (nargin<=3)||(isempty(n))
-        n_in = ones(d,1);
-    else
+    n_in = ones(d,1);
+    if (nargin>3)&&(~isempty(n))
         if (numel(n)~=d)
             error('mode sizes of %s are inconsistent', aname);
         end;

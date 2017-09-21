@@ -120,13 +120,13 @@ if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end;
 if (~isfield(opts, 'verb'));           opts.verb=1;               end;
 if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end;
 if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
-if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=10;   end;
+if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=100;  end;
+if (~isfield(opts, 'time_scheme'));    opts.time_scheme='cheb';   end;
 
 % The local_iters parameter affects only the spatial blocks. The temporal
-% system will be solved directly, so just exit after 1 dummy iteration
-% inside the AMEn algorithm
+% system will be solved directly here, so just exit from the inner iteration
 if (numel(opts.local_iters)==1)
-    opts.local_iters = [opts.local_iters*ones(d,1); 1];
+    opts.local_iters = [opts.local_iters*ones(d,1); 0];
 end;
 
 % Orthogonalize the spatial part of the solution
@@ -165,7 +165,13 @@ end;
 
 % Prepare a random initial guess for z
 z = cell(d+1,1);
-rz = [1;opts.kickrank*ones(d,1);1];
+if (isscalar(opts.kickrank))
+    rz = [1;opts.kickrank*ones(d,1);1];
+elseif (numel(opts.kickrank)==d)
+    rz = [1;opts.kickrank;1]; % we might prefer a particular rank shape
+else
+    error('number of different rz components should be %d', d);
+end;
 for i=d+1:-1:2
     z{i} = randn(rz(i), n(i), 1, rz(i+1));
     [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
@@ -176,18 +182,35 @@ z{1} = randn(1, n(1), 1, rz(2));
 X_global = cell(d+1,10);
 t_global = cell(10,1);
 
-% Spectral differentiators
-[t_coarse,St]=chebdiff(n(d+1));
-% Temporal RHS
-rhst = sum(St, 2);
-rhst = reshape(rhst, 1, n(d+1));
-iSt = inv(St);
-% Twice as many points for grid refinement
-[t_fine,St2]=chebdiff(n(d+1)*2);
-% Temporal RHS
-% Construct interpolants
-P = cheb2_interpolant(t_coarse, t_fine);
-iSt2 = St2\P;
+if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+    % Spectral differentiators
+    [t_coarse,St]=chebdiff(n(d+1));
+    % Temporal RHS
+    rhst = sum(St, 2);
+    rhst = reshape(rhst, 1, n(d+1));
+    iSt = inv(St);
+    % Twice as many points for grid refinement
+    [t_fine,St2]=chebdiff(n(d+1)*2);
+    % Temporal RHS
+    % Construct interpolants
+    P = cheb2_interpolant(t_coarse, t_fine);
+    iSt2 = St2\P;
+elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+    if (mod(n(d+1),2)==0)
+        error('Crank-Nicolson scheme requires odd number of time points');
+    end;
+    % Crank-Nicolson matrices
+    Mt = spdiags(ones(n(d+1),1)*([0.5 0.5]/(n(d+1)-1)), -1:0, n(d+1), n(d+1));
+    Mt(1,1) = 0; % initial state is included into the storage
+    Gt = spdiags(ones(n(d+1),1)*[-1 1], -1:0, n(d+1), n(d+1));
+    rhst = eye(1,n(d+1));
+    t_coarse = (0:(n(d+1)-1))'/(n(d+1)-1);
+    Mt2 = spdiags(ones(2*n(d+1)-1,1)*([0.25 0.25]/(n(d+1)-1)), -1:0, 2*n(d+1)-1, 2*n(d+1)-1);
+    Mt2(1,1) = 0; % initial state is included into the storage
+    Gt2 = spdiags(ones(2*n(d+1)-1,1)*[-1 1], -1:0, 2*n(d+1)-1, 2*n(d+1)-1);
+else
+    error('Only Chebyshev and CN (Crank-Nicolson) schemes are implemented so far');
+end;
 
 % Time stepping
 time_step = 1;
@@ -203,8 +226,24 @@ while (time_global<1)
     for k=1:Ra
         As{1,k}=As{1,k}*time_step;
     end;
-    % Put the temporal derivative into the storage
-    As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));
+    if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+        % Put the Chebyshev temporal derivative into the storage
+        As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));        
+    elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+        % Crank-Nicolson matrices
+        As_true = As(d+1,1:Ra); % save this for residual estimation below
+        for k=1:Ra
+            % Multiply by mass
+            As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
+            As{d+1,k} = As{d+1,k}.';
+            As{d+1,k} = reshape(As{d+1,k}, n(d+1), n(d+1)*ras(d+1,k));
+            As{d+1,k} = Mt*As{d+1,k};
+            As{d+1,k} = reshape(As{d+1,k}, n(d+1)*n(d+1), ras(d+1,k));
+            As{d+1,k} = As{d+1,k}.';
+            As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
+        end;
+        As{d+1,Ra+1} = Gt;
+    end;
     
     % Save the original X for if we need to reject the time step   
     rx = [cellfun(@(x)size(x,1), X); 1];
@@ -217,9 +256,9 @@ while (time_global<1)
     x0{d} = reshape(x0{d}, rx(d), n(d), 1);
     % x0's second norm
     x0norm = norm(x0{d}, 'fro');
-    % Temporal RHS    
+    % Temporal RHS
     x0{d+1} = rhst;
-    
+        
     % Drop residual reductions, since x0 has changed
     ZAX = []; ZY = [];
     
@@ -252,30 +291,67 @@ while (time_global<1)
         else
             u0 = u0*(x0norm/norm(u0)); % this can perturb the solution if the time discretization is insufficient
         end;
-        % Spatial matrix is reduced to XAX{d+1} [rxs(d+1) x rxs(d+1) x ras(d+1)]
-        At = zeros(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
-        % Assemble the space-time systems
-        for k=1:Ra
-            Atk = reshape(XAX{k,d+1}, rx(d+1)*rx(d+1), ras(d+1,k));
-            Atk2 = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
-            Atk2 = Atk*Atk2;
-            Atk2 = reshape(Atk2, rx(d+1), rx(d+1), n(d+1), n(d+1));
-            Atk2 = permute(Atk2, [1,3,2,4]);
-            Atk2 = reshape(Atk2, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
-            At = At+Atk2;
+        if (~isempty(strfind(lower(opts.time_scheme), 'cheb'))) 
+            % Chebyshev reduced ODE solver
+            % Spatial matrix is reduced to XAX{d+1} [rxs(d+1) x rxs(d+1) x ras(d+1)]
+            At = zeros(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
+            % Assemble the space-time systems
+            for k=1:Ra
+                Atk = reshape(XAX{k,d+1}, rx(d+1)*rx(d+1), ras(d+1,k));
+                Atk2 = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
+                Atk2 = Atk*Atk2;
+                Atk2 = reshape(Atk2, rx(d+1), rx(d+1), n(d+1), n(d+1));
+                Atk2 = permute(Atk2, [1,3,2,4]);
+                Atk2 = reshape(Atk2, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
+                At = At+Atk2;
+            end;
+            % Solve the system with the square matrix first
+            AT = eye(rx(d+1)*n(d+1)) + kron(iSt, eye(rx(d+1)))*At;
+            yt = repmat(u0, 1, n(d+1));
+            yt = reshape(yt, rx(d+1)*n(d+1), 1);
+            xt = AT\yt;
+            X{d+1} = reshape(xt, rx(d+1), n(d+1));
+            
+            % We want to estimate the residual by using a rectangular Cheb matrix
+            AT2 = kron(P, eye(rx(d+1))) + kron(iSt2,eye(rx(d+1)))*At;
+            yt = repmat(u0, 1, 2*n(d+1));
+            yt = reshape(yt, rx(d+1)*n(d+1)*2, 1);
+            time_resid = norm(AT2*xt - yt, 'fro')/norm(yt, 'fro');
+        elseif (~isempty(strfind(lower(opts.time_scheme), 'cn'))) 
+            % Crank-Nicolson reduced ODE solver
+            At = sparse(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
+            for k=1:Ra
+                At2 = As_true{k};
+                if (ras(d+1,k)>1)
+                    At2 = reshape(At2, ras(d+1,k), n(d+1)*n(d+1));
+                    for j=1:ras(d+1,k)
+                        At = At + kron(reshape(At2(j,:), n(d+1), n(d+1)), sparse(XAX{k,d+1}(:,:,j)));
+                    end;
+                else
+                    At = At + kron(At2, sparse(XAX{k,d+1}));
+                end;
+            end;
+            AT = kron(Gt, speye(rx(d+1))) + kron(Mt, speye(rx(d+1)))*At;
+            yt = [u0; zeros(rx(d+1)*(n(d+1)-1), 1)];
+            xt = AT\yt;
+            X{d+1} = reshape(xt, rx(d+1), n(d+1));
+            
+            % estimate the residual
+            % interpolate Ax
+            xt2 = At*xt;
+            xt2 = reshape(xt2, rx(d+1), n(d+1));
+            yt2 = zeros(rx(d+1), 2*n(d+1)-1);
+            yt2(:, 1:2:(2*n(d+1)-1)) = xt2;
+            yt2(:, 2:2:(2*n(d+1)-2)) = (xt2(:,1:(n(d+1)-1))+xt2(:,2:n(d+1)))*0.5;
+            yt2 = yt2*Mt2.';
+            yt2 = yt2/Gt2.';
+            % interpolate x
+            xt2 = zeros(rx(d+1), 2*n(d+1)-1);
+            xt = reshape(xt, rx(d+1), n(d+1));
+            xt2(:, 1:2:(2*n(d+1)-1)) = xt;
+            xt2(:, 2:2:(2*n(d+1)-2)) = (xt(:,1:(n(d+1)-1))+xt(:,2:n(d+1)))*0.5;
+            time_resid = norm(xt2 + yt2 - u0*ones(1,2*n(d+1)-1), 'fro')/norm(u0)/sqrt(2*n(d+1)-1);
         end;
-        % Solve the system with the square matrix first
-        AT = eye(rx(d+1)*n(d+1)) + kron(iSt, eye(rx(d+1)))*At;
-        yt = repmat(u0, 1, n(d+1));
-        yt = reshape(yt, rx(d+1)*n(d+1), 1);
-        xt = AT\yt;
-        X{d+1} = reshape(xt, rx(d+1), n(d+1));
-        
-        % We want to estimate the residual by using a rectangular Cheb matrix
-        AT2 = kron(P, eye(rx(d+1))) + kron(iSt2,eye(rx(d+1)))*At;
-        yt = repmat(u0, 1, 2*n(d+1));
-        yt = reshape(yt, rx(d+1)*n(d+1)*2, 1);
-        time_resid = norm(AT2*xt - yt, 'fro')/norm(yt, 'fro');
         
         if (opts.verb>0)
             fprintf('tamen: t=%g, swp=%d, err=%3.3e, res=%3.3e, time_res=%3.3e, rank=%d\n', time_global+time_step, swp, max_err, max_res, time_resid, max(rx));
@@ -314,7 +390,11 @@ while (time_global<1)
         time_global = time_global + time_step;
     end;
     % Amend the time step to the current error
-    time_step = time_step*min(0.5*(dtime_step)^(2/n(d+1)), 2);
+    if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+        time_step = time_step*min(0.5*(dtime_step)^(1/n(d+1)), 2);
+    elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+        time_step = time_step*min(0.5*sqrt(dtime_step), 2); % Crank-Nicolson is 2nd order
+    end;
     if (opts.verb>0)
         fprintf('new time step=%3.3e ', time_step);
         if (reject)
@@ -434,7 +514,8 @@ for k=1:Ra
     if (isempty(As{d+1,k}))
         As{d+1,k} = eye(n(d+1));
     end;
-    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1), n(d+1));
+    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
+    As{d+1,k} = sparse(As{d+1,k});
     As{d+1,k} = -As{d+1,k};
 end;
 end

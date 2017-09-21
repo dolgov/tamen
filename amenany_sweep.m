@@ -123,9 +123,14 @@ resids = zeros(d,1);
 % Left to right AMEn iteration: solution
 for i=1:d
     % Prepare the local system
+    sol_prev = reshape(x{i}, rx(i)*n(i)*rx(i+1),1);
+    lociters = opts.local_iters;
+    % Extract the current number of iterations wisely
+    if (numel(lociters)>1)
+        lociters = lociters(i);
+    end;
     % Right hand side
     rhs = assemble_local_vector(XY(:,i), y(i,:), XY(:,i+1));
-    sol_prev = reshape(x{i}, rx(i)*n(i)*rx(i+1),1);
     norm_rhs = norm(rhs);
     % Extract the matrix parts, accelerate a plenty of iterations with them
     XAX1 = XAX(:,i);
@@ -135,67 +140,66 @@ for i=1:d
     ra2 = ra(i+1,:);
     for k=1:Ra
         Ai{k} = reshape(Ai{k}, ra1(k)*n(i), n(i)*ra2(k));
-    end;    
+    end;
     % Matvec function. We must pass all sizes, since extracting them in
     % every iteration is too expensive
     mvfun = @(x)local_matvec(x, rx(i),n(i),rx(i+1),1, rx(i),n(i),rx(i+1), XAX1, Ai, XAX2, Ra,ra1,ra2);
     % Measure the residual
     resids(i) = norm(rhs-mvfun(sol_prev))/norm_rhs;
     
-    if (rx(i)*n(i)*rx(i+1)<opts.max_full_size)
-        % If the system size is small, assemble the full system and solve
-        % directly    
-        [B,sparseflag] = assemble_local_matrix(XAX1, A(i,:), XAX2);
-        if (sparseflag)
-            % Permute the indices such that the spatial mode is the senior,
-            % since usually it is large and sparsified, but the rank modes
-            % are dense.
-            rhs = reshape(rhs, rx(i)*n(i), rx(i+1));
-            rhs = rhs.';
-            rhs = reshape(rhs, rx(i+1)*rx(i)*n(i), 1);
-        end;
-        sol = B\rhs;
-        if (sparseflag)
-            % Recover the dimension order back
-            sol = reshape(sol, rx(i+1), rx(i)*n(i));
-            sol = sol.';
-            sol = reshape(sol, rx(i)*n(i)*rx(i+1), 1);
-            rhs = reshape(rhs, rx(i+1), rx(i)*n(i));
-            rhs = rhs.';
-            rhs = reshape(rhs, rx(i)*n(i)*rx(i+1), 1);            
-        end;
-        % Report if necessary
-        if (opts.verb>1)
-            fprintf('\tamen_sweep: i=%d. Mldivide: sparse=%d. ', i, sparseflag);
-        end;        
-    else
-        % System is large, solve iteratively
-        lociters = opts.local_iters;
-        % Extract the current number of iterations wisely
-        if (numel(lociters)>1)
-            lociters = lociters(i);
-        end;
-        % Run the bicgstab without a preconditioner first
-        [sol,flg,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, [], [], sol_prev);
-        % Report
-        if ((opts.verb>1)&&(flg==0))
-            fprintf('\tamen_sweep: i=%d. Bicgstab: %g iters, residual %3.3e. ', i, iter, relres);
-        end;
-        % If we did not converge...
-        if (flg>0)&&(lociters>1)
-            precfun = [];
-            % ... use the Block Jacobi preconditioner, if required            
-            if (strcmp(opts.local_prec, 'r'))
-                P = assemble_local_rjacobi(XAX1, A(i,:), XAX2);
-                precfun = @(x)local_precvec(x, rx(i),n(i),rx(i+1),1, P);
+    if (lociters>0)        
+        if (rx(i)*n(i)*rx(i+1)<opts.max_full_size)
+            % If the system size is small, assemble the full system and solve
+            % directly
+            [B,sparseflag] = assemble_local_matrix(XAX1, A(i,:), XAX2);
+            if (sparseflag)
+                % Permute the indices such that the spatial mode is the senior,
+                % since usually it is large and sparsified, but the rank modes
+                % are dense.
+                rhs = reshape(rhs, rx(i)*n(i), rx(i+1));
+                rhs = rhs.';
+                rhs = reshape(rhs, rx(i+1)*rx(i)*n(i), 1);
             end;
-            % In any case, run the bicg once again
-            [sol,~,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, precfun, [], sol);
-            % And report its performance
+            sol = B\rhs;
+            if (sparseflag)
+                % Recover the dimension order back
+                sol = reshape(sol, rx(i+1), rx(i)*n(i));
+                sol = sol.';
+                sol = reshape(sol, rx(i)*n(i)*rx(i+1), 1);
+                rhs = reshape(rhs, rx(i+1), rx(i)*n(i));
+                rhs = rhs.';
+                rhs = reshape(rhs, rx(i)*n(i)*rx(i+1), 1);
+            end;
+            % Report if necessary
             if (opts.verb>1)
-                fprintf('\tamen_sweep: i=%d. Bicgstab(prec): %g iters, residual %3.3e. ', i, lociters+iter, relres);
+                fprintf('\tamen_sweep: i=%d. Mldivide: sparse=%d. ', i, sparseflag);
+            end;
+        else
+            % System is large, solve iteratively
+            % Run the bicgstab without a preconditioner first
+            [sol,flg,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, [], [], sol_prev);
+            % Report
+            if ((opts.verb>1)&&(flg==0))
+                fprintf('\tamen_sweep: i=%d. Bicgstab: %g iters, residual %3.3e. ', i, iter, relres);
+            end;
+            % If we did not converge...
+            if (flg>0)
+                precfun = [];
+                % ... use the Block Jacobi preconditioner, if required
+                if (strcmp(opts.local_prec, 'r'))
+                    P = assemble_local_rjacobi(XAX1, A(i,:), XAX2);
+                    precfun = @(x)local_precvec(x, rx(i),n(i),rx(i+1),1, P);
+                end;
+                % In any case, run the bicg once again
+                [sol,~,relres,iter] = bicgstab(mvfun, rhs, max(loctol/opts.resid_damp,eps*1e3), lociters, precfun, [], sol);
+                % And report its performance
+                if (opts.verb>1)
+                    fprintf('\tamen_sweep: i=%d. Bicgstab(prec): %g iters, residual %3.3e. ', i, lociters+iter, relres);
+                end;
             end;
         end;
+    else
+        sol = sol_prev;
     end;
     
     % Measure the error
@@ -206,7 +210,7 @@ for i=1:d
     if (loctol>0)&&(i<d)&&(Rz>0)
         [u,s,v]=svd(sol,'econ');
         s = diag(s);
-        if (strcmp(opts.trunc_norm, 'fro'))
+        if (strcmp(opts.trunc_norm, 'fro')||(lociters==0))
             % We are happy with the Frobenius-norm truncation
             sum_s=cumsum(s(end:-1:1).^2);
             r = find(sum_s>=(loctol*norm(s)).^2, 1);
