@@ -1,14 +1,20 @@
-% Interpolation on a Chebyshev grid in time
-%   function [x]=extract_snapshot(X,t,tx)
+% Interpolation on a Chebyshev or uniform grid in time
+%   function [x]=extract_snapshot(X,t,tx, scheme)
 %
 % Extracts x=X(:,...,:,tx) from tamen outputs X (solution TT tensor(s)) and 
-% t (cell array of time grid points) via barycentric Chebyshev interpolation. 
-% For stability, tx should be in [0,1].
+% t (cell array of time grid points) via barycentric Chebyshev
+% interpolation of the Chebyshev scheme, and linear interpolation for the
+% Crank-Nicolson scheme.
+% To avoid extrapolation, tx should be in [0,1].
 % If X is in {d+1,R} format, returns x in {d,numel(tx)} format.
 % If X is a tt_tensor (d+1-dimensional), returns x as a d-dimensional
 % tt_tensor, or a 1 x numel(tx) cell of such, if numel(tx)>1.
 
-function [x]=extract_snapshot(X,t,tx)
+function [x]=extract_snapshot(X,t,tx, scheme)
+if (nargin<4)||(isempty(scheme))
+    scheme = 'cheb';
+end;
+
 % number of grid points in each subinterval
 nt = cellfun(@numel, t);
 % find which interval tx belongs to
@@ -39,8 +45,17 @@ for i=1:numel(tx)
     end;
     
     % Interpolate the time block
-    p = cheb2_interpolant(t{ind(i)},tx(i));    
-    Xt = Xt*p.';
+    if (~isempty(strfind(lower(scheme), 'cheb')))
+        p = cheb2_interpolant(t{ind(i)},tx(i));
+        Xt = Xt*p.';
+    elseif (~isempty(strfind(lower(scheme), 'cn')))
+        % Interp linearly
+        k = find(tx(i)<=t{ind(i)}, 1)-1; % the point on the left of tx
+        p = [tx(i)-t{ind(i)}(k)  t{ind(i)}(k+1)-tx(i)]/(t{ind(i)}(k+1)-t{ind(i)}(k));
+        Xt = Xt(:,k)*p(2) + Xt(:,k+1)*p(1);
+    else
+        error('Only Chebyshev and CN (Crank-Nicolson) schemes are implemented so far');
+    end;
     
     % Contract the time block with the spatial part
     if (isa(x{1,i}, 'tt_tensor'))
