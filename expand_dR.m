@@ -21,7 +21,7 @@ else
         end
         [~,n(i),m(i),~] = size(y{i,1});
     end
-end;
+end
 
 
 for k=1:Ry
@@ -42,6 +42,6 @@ for k=1:Ry
         Y = Yk;
     else
         Y = Y + Yk;
-    end;
+    end
 end
 end
