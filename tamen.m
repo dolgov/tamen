@@ -2,14 +2,14 @@
 %   function [X,t,opts,x] = tamen(X,A,tol,opts,obs)
 %
 % Tries to solve the linear ODE dx/dt=Ax in the Tensor Train format using 
-% the AMEn iteration for the Chebyshev discretization of the time derivative.
-% The time interval is [0,1], please rescale A if necessary.
-% Nevertheless, the interval can be resplit adaptively. 
-% This may result in different forms of output,
-% depending on how many inner splittings were necessary, see below.
+% the AMEn iteration and the Chebyshev or Crank-Nicolson discretization 
+% of the time derivative. The time interval is [0,1], please rescale A 
+% appropriately. If necessary, the scheme splits the interval adaptively. 
+% This may result in different forms of output, depending on how many inner
+% splittings were necessary, see below.
 %
-% X is the whole solution, which must have the form of the tensor train,
-% where the last TT block should carry the time variable.
+% X is the whole space-time solution, which must have the form of the 
+% tensor train, where the last TT block should carry the time variable.
 % X can be either a tt_tensor class from the TT-Toolbox, 
 % or a cell array of size d+1 x 1, containing TT cores (see help ttdR).
 % In the latter case, output can be a d+1 x R cell array if the time interval 
@@ -18,11 +18,11 @@
 % d+1 x R form with R>1. Only the latest column (:,R) will be extracted,
 % since it is the column where the last snapshot from the previous run is
 % located.
-% If X was given as tt_tensor and many time intervals were necessary, the
-% output will be a 1 x R cell of tt_tensors.
+% If X was given as tt_tensor and the time interval was split, the output 
+% will be a 1 x R cell of tt_tensors.
 % 
 % The initial state is extracted as the last snapshot from X. Therefore,
-% in the first time step you can pass in the form X = tkron(x0, tt_ones(nt)) 
+% in the first time step you can pass it in the form X = tkron(x0, tt_ones(nt)) 
 % or similar, such that X(:,...,:,nt)=x0. In the subsequent steps it is
 % sufficient to just pass X from the previous step.
 %
@@ -34,12 +34,11 @@
 % this case D==d+1, the first d blocks contain the spatial part, and the
 % last block must be of size r x nt x nt, diagonal w.r.t. the nt x nt part.
 % The whole matrix is thus diagonal w.r.t. the time, and the diagonal 
-% contains the spatial matrices evaluated at the Chebyshev points, A(t_j)
+% contains the spatial matrices evaluated at the time grid points, A(t_j)
 %
 % If A is a function, it should take two arguments X,t: X is the solution as
 % described above (might be useful if the problem is nonlinear), 
-% and t is the vector of Chebyshev temporal grid points on
-% the current time interval.
+% and t is the vector of time grid points on the current time interval.
 %
 % tol is the relative tensor truncation and stopping threshold for the
 % AMEn method. The error may be measured either in the frobenius norm, or
@@ -56,9 +55,12 @@
 %                               and stopping purposes. Can be either 'fro'
 %                               (Frobenius norm) or 'res' (residual in the
 %                               local system)
-%   time_error_damp (def. 10):  A time step is rejected if the time
+%   time_error_damp (def. 100): A time step is rejected if the time
 %                               discretization error is greater than
 %                               tolerance, divided by time_error_damp
+%   time_scheme (def. 'cheb'):  Time discretization scheme. Can be either
+%                               'cheb' (Chebyshev differentiation) or
+%                               'cn' (Crank-Nicolson).
 %   verb (default 1):           verbosity level: silent (0), sweep info (1)
 %                               or full info for each block (2)
 % opts is returned in outputs, and may be reused in the forthcoming calls.
@@ -72,10 +74,12 @@
 %
 % 
 % The outputs are X (as described above), a cell array t of vectors of 
-% Chebyshev time points in (0,1], opts (with missed fields now populated 
+% time discretization points in (0,1], opts (with missed fields now populated 
 % with their default values), and the last snapshot x=X(:,...,:,end).
 % Every cell in t corresponds to a particular subinterval of the adaptive
 % scheme. Use cell2mat(t) to obtain the global vector of points.
+% The solution can be interpolated to any time in [0,1] using 
+% extract_snapshot routine.
 %
 %
 % ******************
@@ -88,8 +92,7 @@
 %   TT-Toolbox: http://github.com/oseledets/TT-Toolbox
 %   amen_solve: AMEn algorithm: 
 %       S. Dolgov, D. Savostyanov,
-%       http://arxiv.org/abs/1301.6068  and
-%       http://arxiv.org/abs/1304.1222
+%       http://epubs.siam.org/doi/10.1137/140953289
 
 function [X_global,t_global,opts,x] = tamen(X,A,tol,opts,obs)
 % Parse the solution

@@ -30,7 +30,7 @@
 % If the block is dense double, it must be a four-dimensional array of the
 % form r1 x n x m x r2, for both matrix and vector. In the vector case,
 % either n or m can be 1. If the block is sparse, it is always a r1*n x m*r2
-% matrix. Since there is no 4-dimensional sparse storage in matlab, neither
-% a complete sparse svd (not to be confused with partial svds), the only
-% operation supported with sparse {d,R} matrices is the multiplication by
-% vectors.
+% matrix. Since there is neither a 4-dimensional sparse storage in matlab,
+% nor a complete sparse svd (not to be confused with partial svds), the only
+% operations supported with sparse {d,R} matrices are the multiplication by
+% vectors and expansion to the full storage

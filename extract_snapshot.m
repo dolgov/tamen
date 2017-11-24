@@ -1,10 +1,10 @@
 % Interpolation on a Chebyshev or uniform grid in time
-%   function [x]=extract_snapshot(X,t,tx, scheme)
+%   function [x] = extract_snapshot(X,t,tx, scheme)
 %
 % Extracts x=X(:,...,:,tx) from tamen outputs X (solution TT tensor(s)) and 
 % t (cell array of time grid points) via barycentric Chebyshev
-% interpolation of the Chebyshev scheme, and linear interpolation for the
-% Crank-Nicolson scheme.
+% interpolation for the Chebyshev scheme (scheme='cheb'), 
+% and linear interpolation for the Crank-Nicolson scheme (scheme='cn').
 % To avoid extrapolation, tx should be in [0,1].
 % If X is in {d+1,R} format, returns x in {d,numel(tx)} format.
 % If X is a tt_tensor (d+1-dimensional), returns x as a d-dimensional

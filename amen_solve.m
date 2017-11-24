@@ -1,16 +1,17 @@
 % Alternating Minimal Energy algorithm in the TT format for linear systems
-%   function [x,opts]=amen_solve(A,y,tol,opts,x0,aux)
+%   function [x,opts] = amen_solve(A,y,tol,opts,x0,aux)
 %
 % Tries to solve the linear system Ax=y using the the AMEn iteration.
 % 
-% A is the square matrix in the TT format (for good performance it should
+% A is a square matrix in the TT format (for good performance it should
 % also be nonnegative definite, but can be non-symmetric). It can be given as 
 % either a tt_matrix class from the TT-Toolbox, or a cell array of size d x R,
 % containing TT cores (see help ttdR).
 %
 % y is the right-hand side in the TT format. Can be given as either a
 % tt_tensor class from the TT-Toolbox, or a cell array of size d x R, see
-% help ttdR. The solution x is returned in the same format as y.
+% help ttdR. The solution x is returned in the same format as y, but if it
+% is {d,R}, R is always 1.
 %
 % tol is the relative tensor truncation and stopping threshold.
 % The error may be measured either in the frobenius norm, or
@@ -62,10 +63,9 @@
 %
 %
 % ******************
-% Please see the references:
+% Please see the reference:
 %       S. Dolgov, D. Savostyanov,
-%       http://arxiv.org/abs/1301.6068  and
-%       http://arxiv.org/abs/1304.1222
+%       http://epubs.siam.org/doi/10.1137/140953289
 % for more description. 
 % Feedback may be sent to {sergey.v.dolgov,dmitry.savostyanov}@gmail.com
 %
@@ -77,12 +77,12 @@
 function [x,opts]=amen_solve(A,y,tol,opts,x0,aux)
 
 % Parse the right-hand side
-[d,n,~,ry,vectype]=grumble_vector(y,'y');
+[d,n,~,~,vectype]=grumble_vector(y,'y');
 if (isa(y, 'tt_tensor'))
     y = core2cell(tt_matrix(y, n, 1));
 end;
-% Parse the matrix
-[~,~,~,ra]=grumble_matrix(A,'A',d,n);
+% Check the matrix for consistency
+grumble_matrix(A,'A',d,n);
 if (isa(A, 'tt_matrix'))
     A = core2cell(A);
 end;
@@ -98,7 +98,8 @@ if ((nargin<5)||(isempty(x0)))
     x{1} = randn(1, n(1), 1, rx(2));
 else
     x = x0;
-    [~,~,~,rx]=grumble_vector(x,'x',d,n);
+    % Check it for consistency
+    grumble_vector(x,'x',d,n);
     if (isa(x, 'tt_tensor'))
         x = core2cell(tt_matrix(x,n,1));
     end;
@@ -123,12 +124,11 @@ if ((nargin>=6)&&(~isempty(aux)))
         end;
         aux = aux_in;
     else
-        % Aux contains {d,R}
-        [~,~,~,raux]=grumble_vector(aux,'aux',d,n);
+        % Aux contains {d,R}, check for consistency
+        grumble_vector(aux,'aux',d,n);
     end;
 else
     aux = [];
-    raux = [];
 end;
 
 % Parse opts parameters. We just populate what we do not have by defaults
