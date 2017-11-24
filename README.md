@@ -37,7 +37,11 @@ Contents
 
  `cheb2_interpolant.m`       Interpolates between two Chebyshev grids.
 
- `extract_snapshot.m`      Interpolates the global space-time TT solution from tamen into one time point.
+ `extract_snapshot.m`      Interpolates the global space-time TT solution from tamen at an arbitrary time point.
+
+ `dot_dR.m`         Dot product of two TT tensors in {d,R} cell storage.
+
+ `expand_dR.m`      Expands a TT tensor in {d,R} storage into full array. *Beware of the curse of dimensionality!*
 
 - Technical routines (internal/expert use only)
 
