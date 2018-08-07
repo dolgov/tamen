@@ -104,5 +104,9 @@ else
     n = n_in;
     rx = rx_in;
     vectype = 'dR';
+    if (min(rx)==0)
+        % Empty vector can be also in this form
+        Rx = 0;
+    end;
 end;
 end

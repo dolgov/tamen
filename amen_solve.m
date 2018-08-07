@@ -143,6 +143,9 @@ if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
 % Prepare the initial guess for the residual
 z = cell(d,1);
 rz = [1;opts.kickrank*ones(d-1,1);1];
+if (opts.kickrank==0)
+    rz = zeros(d+1,1);
+end;
 for i=d:-1:2
     z{i} = randn(rz(i), n(i), 1, rz(i+1));
     [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
