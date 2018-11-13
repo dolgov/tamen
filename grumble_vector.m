@@ -44,7 +44,6 @@ else
         Rx = size(x,2);
     end;
     if (strcmp(xname, 'x')||strcmp(xname, 'z'))&&(Rx>1)
-        fprintf('Extracting the last term of input %s...\n', xname);
         x = x(:,end);
         if (isa(x{1}, 'tt_tensor'))
             x = x{1};

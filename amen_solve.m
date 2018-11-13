@@ -1,5 +1,5 @@
 % Alternating Minimal Energy algorithm in the TT format for linear systems
-%   function [x,opts] = amen_solve(A,y,tol,opts,x0,aux)
+%   function [x,opts,swp] = amen_solve(A,y,tol,opts,x0,aux)
 %
 % Tries to solve the linear system Ax=y using the the AMEn iteration.
 % 
@@ -51,6 +51,7 @@
 %   verb (default 1):           Verbosity level: silent (0), sweep info (1)
 %                               or full info for each block (2).
 % opts is returned in outputs, and may be reused in the forthcoming calls.
+% The third output is the actual number of full sweeps carried out (<=nswp)
 %
 % x0 is the initial guess in the TT format (either tt_tensor or {d,R}). If
 % absent, a random tensor of TT ranks 2 is used.
@@ -72,9 +73,10 @@
 % See also
 %   TT-Toolbox: http://github.com/oseledets/TT-Toolbox
 %   tAMEn:
-%       S. Dolgov, http://arxiv.org/abs/1403.8085
+%       S. Dolgov, https://doi.org/10.1515/cmam-2018-0023
+%               or http://arxiv.org/abs/1403.8085
 
-function [x,opts]=amen_solve(A,y,tol,opts,x0,aux)
+function [x,opts,swp]=amen_solve(A,y,tol,opts,x0,aux)
 
 % Parse the right-hand side
 [d,n,~,~,vectype]=grumble_vector(y,'y');

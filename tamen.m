@@ -84,13 +84,14 @@
 %
 % ******************
 % Please see the reference:
-%   S. Dolgov, http://arxiv.org/abs/1403.8085
+%   S. Dolgov, https://doi.org/10.1515/cmam-2018-0023
+%           or http://arxiv.org/abs/1403.8085
 % for more description. 
 % Feedback may be sent to sergey.v.dolgov@gmail.com
 %
 % See also
 %   TT-Toolbox: http://github.com/oseledets/TT-Toolbox
-%   amen_solve: AMEn algorithm: 
+%   amen_solve: AMEn algorithm for linear systems: 
 %       S. Dolgov, D. Savostyanov,
 %       http://epubs.siam.org/doi/10.1137/140953289
 
