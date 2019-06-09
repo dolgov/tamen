@@ -8,7 +8,7 @@ catch
     % Just skip. Sometimes if you specify -singleCompThread in the command
     % line, MATLAB will fail at maxNumCompThreads with scary, so tell him
     % it's okay.
-end;
+end
 
 % Load the matrix and initial state in the {d,R} format
 load('dat_conv.mat'); % read u0, B, obs
@@ -24,6 +24,8 @@ opts = struct;
 % we want to solve local systems accurately
 % since the ranks are small, use the direct solver always
 opts.max_full_size = inf;
+% Constant vector for preserving the mass
+opts.obs = obs;
 
 % Number of time steps
 N = 100; % one period
@@ -37,7 +39,7 @@ U = [u0; {ones(1,16)}]; % u0 x ones(number of Chebyshev points in the first run)
 for i=1:N
     % Run tamen for the current time interval
     tic; 
-    [U,t,opts]=tamen(U,B,tol,opts,obs);
+    [U,t,opts]=tamen(U,B,tol,opts);
     ttimes(i)=toc;
     % Extract u at the end of the interval
     u = extract_snapshot(U,t,1);
@@ -45,7 +47,7 @@ for i=1:N
     mass_u = 1;
     for j=1:size(u,1)
         mass_u = mass_u*reshape(sum(u{j},2), size(mass_u,2), []);
-    end;
+    end
     err(i,1) = mass_u/mass_u0-1;
     % Compute the second norm
     err(i,2) = norm(u{size(u0,1)}, 'fro')/norm_u0-1;
@@ -53,10 +55,10 @@ for i=1:N
     for k=1:size(u0,1)
         if (size(u{k},4)>rnk(i))
             rnk(i) = size(u{k},4);
-        end;
-    end;
+        end
+    end
     fprintf('====== i=%d, CPU time=%g, rank=%d, d<o|u>=%3.3e, d|u|=%3.3e\n', i, ttimes(i), rnk(i), err(i,1), err(i,2));
-end;
+end
 
 figure(1);
 subplot(1,2,1);

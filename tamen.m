@@ -1,8 +1,8 @@
 % Time-dependent Alternating Minimal Energy algorithm in the TT format
-%   function [X,t,opts,x] = tamen(X,A,tol,opts,obs)
+%   function [X,t,opts,x] = TAMEN(X,A,tol,opts)
 %
-% Tries to solve the linear ODE dx/dt=Ax in the Tensor Train format using 
-% the AMEn iteration and the Chebyshev or Crank-Nicolson discretization 
+% Tries to solve the linear ODE dx/dt=Ax [ + y] in the Tensor Train format 
+% using the AMEn iteration and the Chebyshev or Crank-Nicolson discretization 
 % of the time derivative. The time interval is [0,1], please rescale A 
 % appropriately. If necessary, the scheme splits the interval adaptively. 
 % This may result in different forms of output, depending on how many inner
@@ -63,14 +63,24 @@
 %                               'cn' (Crank-Nicolson).
 %   verb (default 1):           verbosity level: silent (0), sweep info (1)
 %                               or full info for each block (2)
-% opts is returned in outputs, and may be reused in the forthcoming calls.
+%   obs  (default []):          Generating vectors of linear invariants.
+%                               If the exact system conserves the quantities
+%                               dot(c_m,x), and c_m are representable in 
+%                               the TT format, this property may be ensured
+%                               for tAMEn by passing in obs either a 
+%                               1 x M cell array, with obs{m}=c_m in the 
+%                               tt_tensor class from the TT-Toolbox, 
+%                               or a cell array of size d x M containing 
+%                               TT cores (see help ttdR).
+%   rhs  (default []):          Fixed Right hand side y. Similarly to the
+%                               matrix A, this can be a stationary
+%                               d-dimensional tt_tensor or d x R cell array,
+%                               or a time-dependent (d+1)-dimensional
+%                               tt_tensor (or a (d+1) x R cell array), or
+%                               a function @(X,t)RHS(X,t) returning either
+%                               of those.
 %
-% obs is an optional parameter containing generating vectors of linear
-% invariants, if necessary. If the exact system conserves the quantities
-% dot(c_m,x), and c_m are representable in the TT format, this property may
-% be ensured for tAMEn by passing in obs either a 1 x M cell array, with
-% obs{m}=c_m in the tt_tensor class from the TT-Toolbox, or a cell array of
-% size d x M containing TT cores (see help ttdR).
+% opts is returned in outputs, and may be reused in the forthcoming calls.
 %
 % 
 % The outputs are X (as described above), a cell array t of vectors of 
@@ -95,77 +105,80 @@
 %       S. Dolgov, D. Savostyanov,
 %       http://epubs.siam.org/doi/10.1137/140953289
 
-function [X_global,t_global,opts,x] = tamen(X,A,tol,opts,obs)
+function [X_global,t_global,opts,x] = tamen(X,A,tol,opts)
 % Parse the solution
 [d,n,~,rx,vectype]=grumble_vector(X,'x');
 d = d-1; % the last block corresponds to time, distinguish it from "space"
 % by treating the tensor as d+1-dimensional.
 if (isa(X, 'cell'))&&(size(X,2)>1)
     X = X(:,end);
-end;
+end
 if (isa(X{1}, 'tt_tensor'))
     X = X{1};
-end;
+end
 if (isa(X, 'tt_tensor'))
     % Extract tt_tensor content
     X = core2cell(X);
     for i=1:d
         X{i} = reshape(X{i}, rx(i), n(i), 1, rx(i+1));
-    end;
-end;
+    end
+end
 
 % Parse the options
 if (nargin<4)||(isempty(opts))
     opts = struct;
-end;
+end
 % Parse opts parameters. We just populate what we do not have by defaults
-if (~isfield(opts, 'nswp'));           opts.nswp=20;              end;
-if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end;
-if (~isfield(opts, 'verb'));           opts.verb=1;               end;
-if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end;
-if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
-if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=100;  end;
-if (~isfield(opts, 'time_scheme'));    opts.time_scheme='cheb';   end;
+if (~isfield(opts, 'nswp'));           opts.nswp=20;              end
+if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end
+if (~isfield(opts, 'verb'));           opts.verb=1;               end
+if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end
+if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end
+if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=100;  end
+if (~isfield(opts, 'time_scheme'));    opts.time_scheme='cheb';   end
+if (~isfield(opts, 'obs'));            opts.obs=[];               end
+if (~isfield(opts, 'rhs'));            opts.rhs=[];               end
 
 % The local_iters parameter affects only the spatial blocks. The temporal
 % system will be solved directly here, so just exit from the inner iteration
 if (numel(opts.local_iters)==1)
     opts.local_iters = [opts.local_iters*ones(d,1); 0];
-end;
+end
 
 % Orthogonalize the spatial part of the solution
 for i=1:d-1
     [X{i+1},X{i},rx(i+1)] = orthogonalise_block(X{i+1},X{i},1);
-end;
+end
 
 % Parse auxiliary enrichments
-if ((nargin>=5)&&(~isempty(obs)))
-    if (~isa(obs, 'cell'))
+if (~isempty(opts.obs))
+    if (~isa(opts.obs, 'cell'))
         error('Aux vectors must be given in a cell array');
-    end;
-    Raux = size(obs,2);
+    end
+    Raux = size(opts.obs,2);
     Aux = cell(d,Raux);
-    if (isa(obs{1}, 'tt_tensor'))
+    if (isa(opts.obs{1}, 'tt_tensor'))
         % Aux contains tt_tensors
         raux = ones(d+1,Raux);
         for i=1:Raux
-            if (isa(obs{i}, 'tt_tensor'))
-                [~,~,~,raux(:,i)]=grumble_vector(obs{i},'aux',d,n(1:d));
-                Aux(1:d,i) = core2cell(tt_matrix(obs{i}, n(1:d), 1));
+            if (isa(opts.obs{i}, 'tt_tensor'))
+                [~,~,~,raux(:,i)]=grumble_vector(opts.obs{i},'aux',d,n(1:d));
+                Aux(1:d,i) = core2cell(tt_matrix(opts.obs{i}, n(1:d), 1));
             else
                 error('All aux vectors must be either tt_tensors or {d,R}s');
-            end;
-        end;
+            end
+        end
     else
         % Aux contains {d,R}
-        [~,~,~,raux]=grumble_vector(obs,'aux',d,n(1:d));
-        Aux(1:d,:) = obs;
-    end;
+        [~,~,~,raux]=grumble_vector(opts.obs,'aux',d,n(1:d));
+        Aux(1:d,:) = opts.obs;
+    end
 else
     Aux = [];
     raux = [];
     Raux = 0;
-end;
+end
+
 
 % Prepare a random initial guess for z
 z = cell(d+1,1);
@@ -175,18 +188,18 @@ elseif (numel(opts.kickrank)==d)
     rz = [1;opts.kickrank;1]; % we might prefer a particular rank shape
 else
     error('number of different rz components should be %d', d);
-end;
+end
 for i=d+1:-1:2
     z{i} = randn(rz(i), n(i), 1, rz(i+1));
     [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
-end;
+end
 z{1} = randn(1, n(1), 1, rz(2));
 
 % Storage for all time steps
 X_global = cell(d+1,10);
 t_global = cell(10,1);
 
-if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+if (contains(lower(opts.time_scheme), 'cheb'))
     % Spectral differentiators
     [t_coarse,St]=chebdiff(n(d+1));
     % Temporal RHS
@@ -199,10 +212,10 @@ if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
     % Construct interpolants
     P = cheb2_interpolant(t_coarse, t_fine);
     iSt2 = St2\P;
-elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+elseif (contains(lower(opts.time_scheme), 'cn'))
     if (mod(n(d+1),2)==0)
         error('Crank-Nicolson scheme requires odd number of time points');
-    end;
+    end
     % Crank-Nicolson matrices
     Mt = spdiags(ones(n(d+1),1)*([0.5 0.5]/(n(d+1)-1)), -1:0, n(d+1), n(d+1));
     Mt(1,1) = 0; % initial state is included into the storage
@@ -214,7 +227,7 @@ elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
     Gt2 = spdiags(ones(2*n(d+1)-1,1)*[-1 1], -1:0, 2*n(d+1)-1, 2*n(d+1)-1);
 else
     error('Only Chebyshev and CN (Crank-Nicolson) schemes are implemented so far');
-end;
+end
 
 % Time stepping
 time_step = 1;
@@ -224,16 +237,21 @@ while (time_global<1)
     % Don't advance beyond t=1
     if (time_global + time_step>1)
         time_step = 1 - time_global;
-    end;
+    end
     % Parse the matrix and compute it in all possible ways
     [As,Ra,ras] = parse_matrix(A,n,X, time_global + t_coarse*time_step, vectype);
     for k=1:Ra
         As{1,k}=As{1,k}*time_step;
-    end;
-    if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+    end
+    % Parse the right hand side
+    [Rhs,Rrhs,~] = parse_rhs(opts.rhs,n,X, time_global + t_coarse*time_step, vectype);
+    for k=1:Rrhs
+        Rhs{1,k}=Rhs{1,k}*time_step;
+    end    
+    if (contains(lower(opts.time_scheme), 'cheb'))
         % Put the Chebyshev temporal derivative into the storage
         As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));        
-    elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+    elseif (contains(lower(opts.time_scheme), 'cn'))
         % Crank-Nicolson matrices
         As_true = As(d+1,1:Ra); % save this for residual estimation below
         for k=1:Ra
@@ -245,9 +263,12 @@ while (time_global<1)
             As{d+1,k} = reshape(As{d+1,k}, n(d+1)*n(d+1), ras(d+1,k));
             As{d+1,k} = As{d+1,k}.';
             As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
-        end;
+        end
         As{d+1,Ra+1} = Gt;
-    end;
+        if (Rrhs>0)
+            error('Crank-Nicolson is not yet implemented for the right hand side')
+        end
+    end
     
     % Save the original X for if we need to reject the time step   
     rx = [cellfun(@(x)size(x,1), X); 1];
@@ -262,6 +283,11 @@ while (time_global<1)
     x0norm = norm(x0{d}, 'fro');
     % Temporal RHS
     x0{d+1} = rhst;
+    
+    % Source RHS
+    if (Rrhs>0)
+        x0 = [x0, Rhs];                                                %#ok
+    end
         
     % Drop residual reductions, since x0 has changed
     ZAX = []; ZY = [];
@@ -275,7 +301,7 @@ while (time_global<1)
         max_res = max(resids);
         
         % The last temporal system must be solved directly.
-        u0 = XY{d+1}; % size rxs(d+1) x 1
+        u0 = XY{1,d+1}; % size rxs(d+1) x 1
         % Correct the 2nd norm. It is transparent: we adjust the norm of the
         % projected initial guess, not the final solution. That is, it works
         % also if the matrix does not conserve the second norm.
@@ -286,7 +312,7 @@ while (time_global<1)
             for k=1:Raux
                 Caux(:,pos:pos+raux(d+1,k)-1) = XAUX{k,d+1}; % each xaux is rxs(d+1) x 1
                 pos = pos+raux(d+1,k);
-            end;
+            end
             [Caux,~]=qr(Caux,0);
             u0_save = Caux'*u0;
             u0_change = u0 - Caux*u0_save;
@@ -294,8 +320,8 @@ while (time_global<1)
             u0 = Caux*u0_save + u0_change;
         else
             u0 = u0*(x0norm/norm(u0)); % this can perturb the solution if the time discretization is insufficient
-        end;
-        if (~isempty(strfind(lower(opts.time_scheme), 'cheb'))) 
+        end
+        if (contains(lower(opts.time_scheme), 'cheb')) 
             % Chebyshev reduced ODE solver
             % Spatial matrix is reduced to XAX{d+1} [rxs(d+1) x rxs(d+1) x ras(d+1)]
             At = zeros(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
@@ -308,10 +334,14 @@ while (time_global<1)
                 Atk2 = permute(Atk2, [1,3,2,4]);
                 Atk2 = reshape(Atk2, rx(d+1)*n(d+1), rx(d+1)*n(d+1));
                 At = At+Atk2;
-            end;
+            end
             % Solve the system with the square matrix first
             AT = eye(rx(d+1)*n(d+1)) + kron(iSt, eye(rx(d+1)))*At;
             yt = repmat(u0, 1, n(d+1));
+            % Add source right hand side
+            for k=1:Rrhs
+                yt = yt + XY{k+1,d+1}*Rhs{d+1,k}*iSt.';
+            end            
             yt = reshape(yt, rx(d+1)*n(d+1), 1);
             xt = AT\yt;
             X{d+1} = reshape(xt, rx(d+1), n(d+1));
@@ -319,9 +349,13 @@ while (time_global<1)
             % We want to estimate the residual by using a rectangular Cheb matrix
             AT2 = kron(P, eye(rx(d+1))) + kron(iSt2,eye(rx(d+1)))*At;
             yt = repmat(u0, 1, 2*n(d+1));
+            % Add source right hand side
+            for k=1:Rrhs
+                yt = yt + XY{k+1,d+1}*Rhs{d+1,k}*iSt2.';
+            end                        
             yt = reshape(yt, rx(d+1)*n(d+1)*2, 1);
             time_resid = norm(AT2*xt - yt, 'fro')/norm(yt, 'fro');
-        elseif (~isempty(strfind(lower(opts.time_scheme), 'cn'))) 
+        elseif (contains(lower(opts.time_scheme), 'cn')) 
             % Crank-Nicolson reduced ODE solver
             At = sparse(rx(d+1)*n(d+1), rx(d+1)*n(d+1));
             for k=1:Ra
@@ -330,13 +364,16 @@ while (time_global<1)
                     At2 = reshape(At2, ras(d+1,k), n(d+1)*n(d+1));
                     for j=1:ras(d+1,k)
                         At = At + kron(reshape(At2(j,:), n(d+1), n(d+1)), sparse(XAX{k,d+1}(:,:,j)));
-                    end;
+                    end
                 else
                     At = At + kron(At2, sparse(XAX{k,d+1}));
-                end;
-            end;
+                end
+            end
             AT = kron(Gt, speye(rx(d+1))) + kron(Mt, speye(rx(d+1)))*At;
             yt = [u0; zeros(rx(d+1)*(n(d+1)-1), 1)];
+            if (Rrhs>0)
+                error('Crank-Nicolson is not yet implemented for the right hand side')
+            end
             xt = AT\yt;
             X{d+1} = reshape(xt, rx(d+1), n(d+1));
             
@@ -355,11 +392,11 @@ while (time_global<1)
             xt2(:, 1:2:(2*n(d+1)-1)) = xt;
             xt2(:, 2:2:(2*n(d+1)-2)) = (xt(:,1:(n(d+1)-1))+xt(:,2:n(d+1)))*0.5;
             time_resid = norm(xt2 + yt2 - u0*ones(1,2*n(d+1)-1), 'fro')/norm(u0)/sqrt(2*n(d+1)-1);
-        end;
+        end
         
         if (opts.verb>0)
             fprintf('tamen: t=%g, swp=%d, err=%3.3e, res=%3.3e, time_res=%3.3e, rank=%d\n', time_global+time_step, swp, max_err, max_res, time_resid, max(rx));
-        end;
+        end
         
         % A ratio of the time error and the tolerance
         dtime_step = tol/(opts.time_error_damp*time_resid);
@@ -369,18 +406,18 @@ while (time_global<1)
             X = X_initial;
             reject = true;
             break;
-        end;
+        end
         
         % Check AMEn convergence
         if (swp>=opts.nswp)||((strcmp(opts.trunc_norm, 'fro'))&&(max_err<tol))||((~strcmp(opts.trunc_norm, 'fro'))&&(max_res<tol))
             % The current time step converged, include it and advance time
             break;
-        end;
-    end;
+        end
+    end
 
     if (opts.verb>0)
         fprintf('\t t=%g, time_res=%3.3e, rank=%d, ', time_global+time_step, time_resid, max(rx));
-    end;
+    end
     if (~reject)
         % this time step was ok, register it
         t_cnt = t_cnt + 1;
@@ -388,26 +425,26 @@ while (time_global<1)
             % allocate more cells
             X_global = [X_global, cell(d+1,10)];                       %#ok
             t_global = [t_global; cell(10,1)];                         %#ok
-        end;
+        end
         X_global(:,t_cnt) = X;
         t_global{t_cnt} = time_global + t_coarse*time_step;
         time_global = time_global + time_step;
-    end;
+    end
     % Amend the time step to the current error
-    if (~isempty(strfind(lower(opts.time_scheme), 'cheb')))
+    if (contains(lower(opts.time_scheme), 'cheb'))
         time_step = time_step*min(0.5*(dtime_step)^(1/n(d+1)), 2);
-    elseif (~isempty(strfind(lower(opts.time_scheme), 'cn')))
+    elseif (contains(lower(opts.time_scheme), 'cn'))
         time_step = time_step*min(0.5*sqrt(dtime_step), 2); % Crank-Nicolson is 2nd order
-    end;
+    end
     if (opts.verb>0)
         fprintf('new time step=%3.3e ', time_step);
         if (reject)
             fprintf('\t !REJECT!\n\n');
         else
             fprintf('\n\n');
-        end;
-    end;
-end;
+        end
+    end
+end
 
 X_global = X_global(:,1:t_cnt);
 t_global = t_global(1:t_cnt,:);
@@ -418,12 +455,12 @@ if (strcmp(vectype, 'tt_tensor'))
     for k=1:t_cnt
         X_global{1,k} = cell2core(tt_matrix, X_global(:,k));
         X_global{1,k} = X_global{1,k}.tt;
-    end;
+    end
     X_global = X_global(1,:);
     if (t_cnt==1)
         X_global = X_global{1};
-    end;
-end;
+    end
+end
 
 % Return the last snapshot
 if (nargout>3)
@@ -436,12 +473,12 @@ if (nargout>3)
     rx(d+1) = 1;
     for i=1:d
         x{i} = reshape(x{i}, rx(i), n(i), 1, rx(i+1)); % store the sizes in
-    end;
+    end
     if (strcmp(vectype, 'tt_tensor'))
         x = cell2core(tt_matrix,x);
         x = x.tt;
-    end;
-end;
+    end
+end
 
 % local_iters is normally a scalar, return it
 opts.local_iters = opts.local_iters(1);
@@ -464,19 +501,19 @@ if ((~isa(A, 'cell'))&&(~isa(A, 'tt_matrix')))
             r1 = size(X{i},1);
             r2 = size(X{i},4);
             X{i} = reshape(X{i}, r1, n(i), r2);
-        end;        
+        end
         X = cell2core(tt_tensor, X);
         % Otherwise just cast A on it
-    end;
+    end
     A = A(X,t);
-end;
+end
 
 % Then, get the dimension of the matrix
 if (isa(A, 'tt_matrix'))
     D = A.d;
 else
     D = size(A,1);
-end;
+end
 % The only allowed dimensions are d and d+1, where d is the dimension of
 % the space
 switch(D)
@@ -491,36 +528,107 @@ switch(D)
         ras = [ras, ones(d+2,1)]; % for time derivative in further computations
     otherwise
         error('dim(A) must be either d (if A is stationary) or d+1 (time-dependent)');
-end;
+end
 % Now copy the cores
 As = cell(d+1, Ra+1);
 if (isa(A, 'tt_matrix'))
     As(1:D,1) = core2cell(A);
 else
     As(1:D,1:Ra) = A;
-end;
+end
 % Populate the temporal (:,R+1) parts with identities
 for i=1:d
     sparseflag = true;
     for k=1:Ra
-        if (~issparse(As{i,k})); sparseflag=false; break; end;
-    end;
+        if (~issparse(As{i,k})); sparseflag=false; break; end
+    end
     if (sparseflag)
         % The sparse A-block was introduced for something. Such as large n(i). 
         % Use a sparse identity also.
         As{i,Ra+1} = speye(n(i));
     else
         As{i,Ra+1} = reshape(eye(n(i)), 1, n(i), n(i));
-    end;
-end;
+    end
+end
 % Fill temporal (d+1,:) matrix parts with identities if necessary
 for k=1:Ra
     if (isempty(As{d+1,k}))
         As{d+1,k} = eye(n(d+1));
-    end;
+    end
     As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
     As{d+1,k} = sparse(As{d+1,k});
     As{d+1,k} = -As{d+1,k};
-end;
+end
+end
+
+
+
+
+
+function [Rhs,Rrhs,rrhs]=parse_rhs(Rhs,n,X,t,vectype)
+% Parse the fixed (source) RHS. It will be harder than in amen_solve, 
+% since we may have it either stationary or time-dependent, or a function 
+% generating either of those
+
+if (isempty(Rhs))    
+    Rrhs = 0;
+    rrhs = 0;
+    return
+end
+
+% space-only dimension
+d = numel(n)-1;
+
+if ((~isa(Rhs, 'cell'))&&(~isa(Rhs, 'tt_tensor')))
+    % This is a function and takes (X,t)
+    % Cast spatial solution to the desired form    
+    if (strcmp(vectype, 'tt_tensor'))
+        for i=1:d+1
+            r1 = size(X{i},1);
+            r2 = size(X{i},4);
+            X{i} = reshape(X{i}, r1, n(i), r2);
+        end
+        X = cell2core(tt_tensor, X);
+        % Otherwise just cast A on it
+    end
+    Rhs = Rhs(X,t);
+end
+
+% Then, get the dimension
+if (isa(Rhs, 'tt_tensor'))
+    D = Rhs.d;
+else
+    D = size(Rhs,1);
+end
+% The only allowed dimensions are d and d+1, where d is the dimension of
+% the space
+switch(D)
+    case d
+        % Vector is stationary
+        [~,~,Rrhs,rrhs]=grumble_vector(Rhs,'y',d,n(1:d));
+        rrhs = [rrhs; ones(1,Rrhs)];
+    case d+1
+        % Vector is time-dependent
+        [~,~,Rrhs,rrhs]=grumble_vector(Rhs,'y',d+1,n);
+    otherwise
+        error('dim(RHS) must be either d (if it is stationary) or d+1 (time-dependent)');
+end
+% Now copy the cores
+Rhsc = cell(d+1, Rrhs);
+if (isa(Rhs, 'tt_tensor'))
+    Rhsc(1:D,1) = core2cell(Rhs);
+    for k=1:D
+        Rhsc{k} = reshape(Rhsc{k}, rrhs(k), n(k), 1, rrhs(k+1));
+    end
+else
+    Rhsc(1:D,:) = Rhs;
+end
+% Fill temporal (d+1,:) blocks with ones if necessary
+for k=1:Rrhs
+    if (isempty(Rhsc{d+1,k}))
+        Rhsc{d+1,k} = ones(1,n(d+1));
+    end
+end
+Rhs = Rhsc;
 end
 

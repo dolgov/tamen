@@ -6,7 +6,7 @@ catch
     % Just skip. Sometimes if you specify -singleCompThread in the command
     % line, MATLAB will fail at maxNumCompThreads with scary, so tell him
     % it's okay.
-end;
+end
 
 L = 8;
 d = 5;
@@ -39,8 +39,8 @@ for i=1:numel(t)
     % New time step
     if (i<numel(t))
         tau = t{i+1}(end) - t{i}(end);
-    end;
-end;
+    end
+end
 t_seq = toc;
 fprintf('CPU time in the sequential regime %g\n', t_seq);
 fprintf('Ratio t_adapt/t_seq is %g\n', t_adapt/t_seq);
@@ -57,8 +57,8 @@ for i=1:numel(t_geom)
     % New time step
     if (i<numel(t_geom))
         tau = t_geom(i+1) - t_geom(i);
-    end;
-end;
+    end
+end
 t_g = toc;
 fprintf('CPU time for the geometric grid is %g\n', t_g);
 fprintf('Ratio t_adapt/t_geom is %g\n', t_adapt/t_g);
@@ -80,8 +80,8 @@ for i=1:numel(t_geom2)
     % New time step
     if (i<numel(t_geom2))
         tau = t_geom2(i+1) - t_geom2(i);
-    end;
-end;
+    end
+end
 t_g2 = toc;
 fprintf('CPU time for the a priori geometric grid is %g\n', t_g2);
 fprintf('Ratio t_adapt/t_geom_a is %g\n', t_adapt/t_g2);

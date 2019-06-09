@@ -6,7 +6,7 @@ catch
     % Just skip. Sometimes if you specify -singleCompThread in the command
     % line, MATLAB will fail at maxNumCompThreads with scary, so tell him
     % it's okay.
-end;
+end
 
 % One-dimension spatial grid size
 n = 2*ones(10,1);
@@ -38,9 +38,8 @@ opts = struct;
 % we want to solve local systems accurately
 % since the ranks are small, use the direct solver always
 opts.max_full_size = inf;
-
 % Linear invariant is the sum of the elements == dot(ones,u)
-obs = {tt_ones([n;n])};
+opts.obs = {tt_ones([n;n])};
 
 % Single time interval
 tau = 0.2;
@@ -58,16 +57,16 @@ U = tkron(u0,tt_ones(16)); % u0 x ones(number of time points)
 for i=1:N
     % Run tamen for the current time interval
     tic; 
-    [U,t,opts]=tamen(U,B,tol,opts,obs);
+    [U,t,opts]=tamen(U,B,tol,opts);
     ttimes(i)=toc;
     % Extract u at the end of the interval
     u = extract_snapshot(U,t,1);
     rnk(i) = max(u.r);
-    err(i,1) = dot(obs{1}, u)/dot(obs{1},u0)-1; % Error in the sum
+    err(i,1) = dot(opts.obs{1}, u)/dot(opts.obs{1},u0)-1; % Error in the sum
     err(i,2) = norm(u)/norm(u0)-1; % Error in the 2nd norm
     err(i,3) = norm(u-u0)/norm(u0); % Discrepancy with u0. Must be small in the final step
     fprintf('====== i=%d, CPU time=%g, rank=%d, d<o|u>=%3.3e, d|u|=%3.3e, |u-u0|=%3.3e\n', i, ttimes(i), rnk(i), err(i,1), err(i,2), err(i,3));
-end;
+end
 
 figure(1);
 subplot(1,2,1);
