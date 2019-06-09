@@ -316,10 +316,14 @@ while (time_global<1)
             [Caux,~]=qr(Caux,0);
             u0_save = Caux'*u0;
             u0_change = u0 - Caux*u0_save;
-            u0_change = u0_change*sqrt(abs(x0norm^2 - norm(u0_save)^2))/norm(u0_change);
+            if (x0norm>0)
+                u0_change = u0_change*sqrt(abs(x0norm^2 - norm(u0_save)^2))/norm(u0_change);
+            end
             u0 = Caux*u0_save + u0_change;
         else
-            u0 = u0*(x0norm/norm(u0)); % this can perturb the solution if the time discretization is insufficient
+            if (x0norm>0)
+                u0 = u0*(x0norm/norm(u0)); % this can perturb the solution if the time discretization is insufficient
+            end
         end
         if (contains(lower(opts.time_scheme), 'cheb')) 
             % Chebyshev reduced ODE solver
