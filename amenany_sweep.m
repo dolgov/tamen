@@ -64,42 +64,48 @@ if (isempty(ZAX))
     ZAX = repmat(XAX(1,:), Ra, 1);
 end;
 if (isempty(ZY))
-    ZY = repmat(XAX(1,:), Ry+1, 1);
+    ZY = repmat(XAX(1,:), Ry, 1);
 end;
 
 % Right to left iteration: warmup
 for i=d:-1:2
     if (Rz>0)
-        if (~isempty(ZAX{1,i}))
-            % ZAX was passed.
+        if (isempty(ZY{1,i}))
+            % If we have no projection, just use the previous Z block
+            crzy = reshape(z{i}, rz(i)*n(i)*rz(i+1), 1);
+        else
+            % ZY was passed.
             % We assume that X is left-orthogonal, so we may compute the update for Z
             % Project the residual to the Z-block:
-            %   y
+            %   project y
             crzy = assemble_local_vector(ZY(:,i), y(i,:), ZY(:,i+1));
-            %   Ax
+        end
+        if (isempty(ZAX{1,i}))
+            % No projection - No update
+            crzAx = zeros(rz(i)*n(i)*rz(i+1), 1);
+        else
+            % ZAX was passed.
+            %   project Ax
             Ai = A(i,:);
             for k=1:Ra
                 Ai{k} = reshape(Ai{k}, ra(i,k)*n(i), n(i)*ra(i+1,k));
-            end;             
-            crzAx = local_matvec(x{i}, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), Ai, ZAX(:,i+1), Ra,ra(i,:),ra(i+1,:));
-            % Residual is here
-            crz = crzy-crzAx;
-            crz = reshape(crz, rz(i), n(i)*rz(i+1));
-            if (opts.kickrank2>0)
-                % Apply the secondary enrichment (for the residual itself)
-                % using random vectors.
-                [~,~,crz]=svd(crz, 'econ');
-                crz = crz(:,1:max(rz(i)-opts.kickrank2, 1))';
-                crz2 = [crz; randn(opts.kickrank2, n(i)*rz(i+1))];
-                crz = crz2;
             end;
-            % Orthogonalize and store
-            crz = reshape(crz, rz(i), n(i), 1, rz(i+1));
-            [~,z{i},rz(i)] = orthogonalise_block([],crz,-1);
-        else
-            % No information is given, just orthogonalize the residual blocks
-            [z{i-1},z{i},rz(i)] = orthogonalise_block(z{i-1},z{i},-1);
+            crzAx = local_matvec(x{i}, rx(i),n(i),rx(i+1),1, rz(i),n(i),rz(i+1), ZAX(:,i), Ai, ZAX(:,i+1), Ra,ra(i,:),ra(i+1,:));
+        end
+        % Residual is here
+        crz = crzy-crzAx;
+        crz = reshape(crz, rz(i), n(i)*rz(i+1));
+        if (opts.kickrank2>0)
+            % Apply the secondary enrichment (for the residual itself)
+            % using random vectors.
+            [~,~,crz]=svd(crz, 'econ');
+            crz = crz(:,1:max(rz(i)-opts.kickrank2, 1))';
+            crz2 = [crz; randn(opts.kickrank2, n(i)*rz(i+1))];
+            crz = crz2;
         end;
+        % Orthogonalize and store
+        crz = reshape(crz, rz(i), n(i), 1, rz(i+1));
+        [z{i-1},z{i},rz(i)] = orthogonalise_block(z{i-1},crz,-1);
     end;
     
     % Orthogonalization for X

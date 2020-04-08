@@ -238,37 +238,7 @@ while (time_global<1)
     if (time_global + time_step>1)
         time_step = 1 - time_global;
     end
-    % Parse the matrix and compute it in all possible ways
-    [As,Ra,ras] = parse_matrix(A,n,X, time_global + t_coarse*time_step, vectype);
-    for k=1:Ra
-        As{1,k}=As{1,k}*time_step;
-    end
-    % Parse the right hand side
-    [Rhs,Rrhs,~] = parse_rhs(opts.rhs,n,X, time_global + t_coarse*time_step, vectype);
-    for k=1:Rrhs
-        Rhs{1,k}=Rhs{1,k}*time_step;
-    end    
-    if (contains(lower(opts.time_scheme), 'cheb'))
-        % Put the Chebyshev temporal derivative into the storage
-        As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));        
-    elseif (contains(lower(opts.time_scheme), 'cn'))
-        % Crank-Nicolson matrices
-        As_true = As(d+1,1:Ra); % save this for residual estimation below
-        for k=1:Ra
-            % Multiply by mass
-            As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
-            As{d+1,k} = As{d+1,k}.';
-            As{d+1,k} = reshape(As{d+1,k}, n(d+1), n(d+1)*ras(d+1,k));
-            As{d+1,k} = Mt*As{d+1,k};
-            As{d+1,k} = reshape(As{d+1,k}, n(d+1)*n(d+1), ras(d+1,k));
-            As{d+1,k} = As{d+1,k}.';
-            As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
-        end
-        As{d+1,Ra+1} = Gt;
-        if (Rrhs>0)
-            error('Crank-Nicolson is not yet implemented for the right hand side')
-        end
-    end
+
     
     % Save the original X for if we need to reject the time step   
     rx = [cellfun(@(x)size(x,1), X); 1];
@@ -283,19 +253,82 @@ while (time_global<1)
     x0norm = norm(x0{d}, 'fro');
     % Temporal RHS
     x0{d+1} = rhst;
-    
-    % Source RHS
-    if (Rrhs>0)
-        x0 = [x0, Rhs];                                                %#ok
-    end
-        
-    % Drop residual reductions, since x0 has changed
-    ZAX = []; ZY = [];
+
+    % Drop old projections with residual
+    ZAX = [];  ZY = [];
     
     % Start amen sweeps
     for swp=1:opts.nswp
-        % Run the spatial solver                                      
-        [X,rx,z,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(X, As, x0, z, tol, opts, ZAX, ZY, Aux);
+        % Parse the matrix and compute it in all possible ways
+        [As,Ra,ras] = parse_matrix(A,n,X, time_global + t_coarse*time_step, vectype);
+        for k=1:Ra
+            As{1,k}=As{1,k}*time_step;
+        end
+        % Parse the right hand side
+        [Rhs,Rrhs,rfs] = parse_rhs(opts.rhs,n,X, time_global + t_coarse*time_step, vectype);
+        for k=1:Rrhs
+            Rhs{1,k}=Rhs{1,k}*time_step;
+        end
+        if (contains(lower(opts.time_scheme), 'cheb'))
+            % Put the Chebyshev temporal derivative into the storage
+            As{d+1,Ra+1} = reshape(St, 1, n(d+1), n(d+1));
+        elseif (contains(lower(opts.time_scheme), 'cn'))
+            % Crank-Nicolson matrices
+            As_true = As(d+1,1:Ra); % save this for residual estimation below
+            for k=1:Ra
+                % Multiply by mass
+                As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), n(d+1)*n(d+1));
+                As{d+1,k} = As{d+1,k}.';
+                As{d+1,k} = reshape(As{d+1,k}, n(d+1), n(d+1)*ras(d+1,k));
+                As{d+1,k} = Mt*As{d+1,k};
+                As{d+1,k} = reshape(As{d+1,k}, n(d+1)*n(d+1), ras(d+1,k));
+                As{d+1,k} = As{d+1,k}.';
+                As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
+            end
+            As{d+1,Ra+1} = Gt;
+            if (Rrhs>0)
+                error('Crank-Nicolson is not yet implemented for the right hand side')
+            end
+        end
+        % Source RHS
+        if (Rrhs>0)
+            x0rhs = [x0, Rhs];
+            rfs = [[cellfun(@(x)size(x,1), x0); 1], rfs];              %#ok
+        else
+            x0rhs = x0;
+            rfs = [cellfun(@(x)size(x,1), x0); 1];
+        end
+
+        % Adjust residual reductions if the ranks of matrix or RHS changed
+        ras = ras'; % ZAX was Ra x (d+1)
+        for k=1:numel(ZAX)
+            rprev = size(ZAX{k},3);
+            if (rprev<ras(k))
+                % expand the projection with zero (OK due to SV decay)
+                ZAX{k}(:,:,(rprev+1):ras(k)) = 0;                      %#ok
+            end
+            if (rprev>ras(k))
+                % reduce the projection
+                ZAX{k} = ZAX{k}(:,:,1:ras(k));                         %#ok
+            end
+        end
+        ras = ras'; % restore the layout of A-ranks
+        rfs = rfs'; % ZY was Ry x (d+1)
+        for k=1:numel(ZY)
+            rprev = size(ZY{k},2);
+            if (rprev<rfs(k))
+                % expand the projection with zero (OK due to SV decay)
+                ZY{k}(:,(rprev+1):rfs(k)) = 0;                         %#ok
+            end
+            if (rprev>rfs(k))
+                % reduce the projection
+                ZY{k} = ZY{k}(:,1:rfs(k));                             %#ok
+            end
+        end
+        % rfs = rfs'; % rfs is not needed anymore
+
+        % Run the spatial solver
+        [X,rx,z,ZAX,ZY,opts,errs,resids,XAX,XY,XAUX]=amenany_sweep(X, As, x0rhs, z, tol, opts, ZAX, ZY, Aux);
         % Check and report error levels
         max_err = max(errs);
         max_res = max(resids);
