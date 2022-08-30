@@ -213,7 +213,7 @@ for i=1:d
     
     % Truncation
     sol = reshape(sol, rx(i)*n(i), rx(i+1));
-    if (loctol>0)&&(i<d)&&(Rz>0)
+    if (loctol>0)&&(i<d)&&((Rz+Raux)>0)
         [u,s,v]=svd(sol,'econ');
         s = diag(s);
         if (strcmp(opts.trunc_norm, 'fro')||(lociters==0))

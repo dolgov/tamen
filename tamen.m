@@ -105,7 +105,7 @@
 %       S. Dolgov, D. Savostyanov,
 %       http://epubs.siam.org/doi/10.1137/140953289
 
-function [X_global,t_global,opts,x] = tamen(X,A,tol,opts)
+function [X_global,t_global,opts,x, z] = tamen(X,A,tol,opts, z)
 % Parse the solution
 [d,n,~,rx,vectype]=grumble_vector(X,'x');
 d = d-1; % the last block corresponds to time, distinguish it from "space"
@@ -136,6 +136,7 @@ if (~isfield(opts, 'local_iters'));    opts.local_iters=100;      end
 if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end
 if (~isfield(opts, 'time_error_damp'));opts.time_error_damp=100;  end
 if (~isfield(opts, 'time_scheme'));    opts.time_scheme='cheb';   end
+if (~isfield(opts, 'correct_2_norm')); opts.correct_2_norm=true;  end
 if (~isfield(opts, 'obs'));            opts.obs=[];               end
 if (~isfield(opts, 'rhs'));            opts.rhs=[];               end
 
@@ -180,20 +181,22 @@ else
 end
 
 
-% Prepare a random initial guess for z
-z = cell(d+1,1);
-if (isscalar(opts.kickrank))
-    rz = [1;opts.kickrank*ones(d,1);1];
-elseif (numel(opts.kickrank)==d)
-    rz = [1;opts.kickrank;1]; % we might prefer a particular rank shape
-else
-    error('number of different rz components should be %d', d);
+if (nargin<5)||(isempty(z))
+    % Prepare a random initial guess for z
+    z = cell(d+1,1);
+    if (isscalar(opts.kickrank))
+        rz = [1;opts.kickrank*ones(d,1);1];
+    elseif (numel(opts.kickrank)==d)
+        rz = [1;opts.kickrank;1]; % we might prefer a particular rank shape
+    else
+        error('number of different rz components should be %d', d);
+    end
+    for i=d+1:-1:2
+        z{i} = randn(rz(i), n(i), 1, rz(i+1));
+        [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
+    end
+    z{1} = randn(1, n(1), 1, rz(2));
 end
-for i=d+1:-1:2
-    z{i} = randn(rz(i), n(i), 1, rz(i+1));
-    [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
-end
-z{1} = randn(1, n(1), 1, rz(2));
 
 % Storage for all time steps
 X_global = cell(d+1,10);
@@ -250,7 +253,11 @@ while (time_global<1)
     x0{d} = x0{d}*X{d+1}(:,end); % Now x0 is ready, and |x0|=|x0{d}|.
     x0{d} = reshape(x0{d}, rx(d), n(d), 1);
     % x0's second norm
-    x0norm = norm(x0{d}, 'fro');
+    if (opts.correct_2_norm)
+        x0norm = norm(x0{d}, 'fro');
+    else
+        x0norm = 0;  % this will turn the norm compensation automatically
+    end   
     % Temporal RHS
     x0{d+1} = rhst;
 
@@ -592,8 +599,13 @@ for k=1:Ra
     if (isempty(As{d+1,k}))
         As{d+1,k} = eye(n(d+1));
     end
-    As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
-    As{d+1,k} = sparse(As{d+1,k});
+    if (n(d+1)>1)
+        As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k)*n(d+1), n(d+1));
+        As{d+1,k} = sparse(As{d+1,k});
+    else
+        % Prevent incorrect handling of a single time point
+        As{d+1,k} = reshape(As{d+1,k}, ras(d+1,k), 1, 1);
+    end
     As{d+1,k} = -As{d+1,k};
 end
 end

@@ -76,7 +76,7 @@
 %       S. Dolgov, https://doi.org/10.1515/cmam-2018-0023
 %               or http://arxiv.org/abs/1403.8085
 
-function [x,opts,swp]=amen_solve(A,y,tol,opts,x0,aux)
+function [x,opts,swp, z]=amen_solve(A,y,tol,opts,x0,aux,  z)
 
 % Parse the right-hand side
 [d,n,~,~,vectype]=grumble_vector(y,'y');
@@ -142,19 +142,22 @@ if (~isfield(opts, 'kickrank'));       opts.kickrank=4;           end;
 if (~isfield(opts, 'verb'));           opts.verb=1;               end;
 if (~isfield(opts, 'trunc_norm'));     opts.trunc_norm='fro';     end;
 
-% Prepare the initial guess for the residual
-z = cell(d,1);
-rz = [1;opts.kickrank*ones(d-1,1);1];
-if (opts.kickrank==0)
-    rz = zeros(d+1,1);
-end;
-for i=d:-1:2
-    z{i} = randn(rz(i), n(i), 1, rz(i+1));
-    [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
-end;
-z{1} = randn(1, n(1), 1, rz(2));
+if (nargin<6)||(isempty(z))
+    % Prepare the initial guess for the residual
+    z = cell(d,1);
+    rz = [1;opts.kickrank*ones(d-1,1);1];
+    if (opts.kickrank==0)
+        rz = zeros(d+1,1);
+    end;
+    for i=d:-1:2
+        z{i} = randn(rz(i), n(i), 1, rz(i+1));
+        [~,z{i},rz(i)] = orthogonalise_block([],z{i},-1);
+    end;
+    z{1} = randn(1, n(1), 1, rz(2));
+end    
 ZAX = [];
 ZY = [];
+
 
 for swp=1:opts.nswp
     % Run the AMEn solver
